@@ -27,3 +27,117 @@
   flex: 1;
   resize: vertical;
 }
+
+.modalidad-toggle {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.modalidad-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modalidad-btn:hover {
+  border-color: var(--color-primary-300);
+}
+
+.modalidad-btn.active {
+  border-color: var(--color-primary-600);
+  background: var(--color-primary-50);
+  color: var(--color-primary-700);
+}
+
+.modalidad-btn-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.calendario-fecha {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  background: var(--color-surface-hover);
+}
+
+.calendario-fecha-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.calendario-fecha-nav {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendario-fecha-nav:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.calendario-fecha-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin-bottom: var(--space-1);
+}
+
+.calendario-fecha-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendario-fecha-dia {
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.calendario-fecha-dia:hover:not(:disabled) {
+  border-color: var(--color-primary-300);
+}
+
+.calendario-fecha-dia:disabled {
+  background: transparent;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.calendario-fecha-dia.seleccionado {
+  border-color: var(--color-primary-600);
+  background: var(--color-primary-100);
+  color: var(--color-primary-800);
+}
+
+.calendario-fecha-nota {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  text-align: center;
+}
