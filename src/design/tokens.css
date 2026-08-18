@@ -1,0 +1,68 @@
+:root {
+  /* Verde de marca (SaaS, sin guia oficial de APIWorking disponible) */
+  --color-primary-50: #f0fdf4;
+  --color-primary-100: #dcfce7;
+  --color-primary-200: #bbf7d0;
+  --color-primary-300: #86efac;
+  --color-primary-400: #4ade80;
+  --color-primary-500: #22c55e;
+  --color-primary-600: #16a34a;
+  --color-primary-700: #15803d;
+  --color-primary-800: #166534;
+  --color-primary-900: #14532d;
+
+  /* Superficies y texto */
+  --color-bg-page: #f4f7f5;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f7faf8;
+  --color-border: #e1e6e2;
+  --color-border-strong: #cbd5ce;
+  --color-text-primary: #0b1f14;
+  --color-text-secondary: #4b5d54;
+  --color-text-muted: #7c8a82;
+  --color-text-on-primary: #ffffff;
+
+  /* Semanticos: tinte de fondo + texto oscuro + icono (nunca relleno solido + texto blanco) */
+  --color-success: #15803d;
+  --color-success-bg: #dcfce7;
+  --color-warning: #b45309;
+  --color-warning-bg: #fef3c7;
+  --color-critical: #b91c1c;
+  --color-critical-bg: #fee2e2;
+  --color-info: #1d4ed8;
+  --color-info-bg: #dbeafe;
+
+  /* Charts: paleta de estado validada con scripts/validate_palette.js (skill
+     dataviz) para marcas de grafico (barras) — separacion CVD verificada.
+     No son los mismos hex que --color-warning/--color-critical de arriba,
+     que estan optimizados para texto sobre fondo tenue en badges, no como
+     marca de grafico. */
+  --chart-good: #0ca30c;
+  --chart-warning: #fab219;
+  --chart-critical: #d03b3b;
+  --chart-sequential: #16a34a;
+
+  /* Tipografia */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Espaciado */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-8: 48px;
+
+  /* Radios y sombras */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(11, 31, 20, 0.06);
+  --shadow-md: 0 4px 16px rgba(11, 31, 20, 0.08);
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --sidebar-width-collapsed: 64px;
+  --topbar-height: 60px;
+}
