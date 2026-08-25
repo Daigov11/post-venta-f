@@ -1,14 +1,11 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
+import { AccionesClienteDrawer, columnaAccionesCliente } from "../components/panels/AccionesClienteDrawer";
+import { ClienteCell } from "../components/ui/ClienteCell";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
-import { Drawer } from "../components/ui/Drawer";
 import { FilterBar } from "../components/ui/FilterBar";
-import { Skeleton } from "../components/ui/Skeleton";
 import { NivelAlertaPill } from "../components/ui/StatusPill";
 import { useAlertas } from "../hooks/useAlertas";
-import { useCliente } from "../hooks/useCliente";
-import type { Alerta, NivelAlerta } from "../types/postventaCliente";
+import type { Alerta, ClienteSistemas, NivelAlerta } from "../types/postventaCliente";
 
 // Mismos tipos que emite el motor de alertas (ver alertaRules en
 // backend/src/engines/alertas.engine.ts) + REUNION_PROXIMA, que se agrega
@@ -30,6 +27,7 @@ const NIVEL_RANK: Record<NivelAlerta, number> = { CRITICAL: 3, WARNING: 2, INFO:
 interface ClienteAlertas {
   numeroDocumentoCliente: string;
   nombreCliente: string;
+  sistemas: ClienteSistemas;
   alertas: Alerta[];
   peorNivel: NivelAlerta;
 }
@@ -46,6 +44,7 @@ function agruparPorCliente(alertas: Alerta[]): ClienteAlertas[] {
       grupo = {
         numeroDocumentoCliente: a.cliente,
         nombreCliente: a.nombreCliente,
+        sistemas: a.sistemas,
         alertas: [],
         peorNivel: a.nivel,
       };
@@ -61,37 +60,6 @@ function agruparPorCliente(alertas: Alerta[]): ClienteAlertas[] {
   });
 }
 
-// Fetchea la ficha del cliente recien al abrir el drawer (no de antemano
-// para toda la lista) — se monta/desmonta con key=numeroDocumentoCliente asi
-// que cada apertura arranca su propio fetch.
-function AccionesClienteDrawer({
-  numeroDocumentoCliente,
-  onClose,
-}: {
-  numeroDocumentoCliente: string;
-  onClose: () => void;
-}) {
-  const { data, loading, error, refetch } = useCliente(numeroDocumentoCliente);
-
-  return (
-    <Drawer open onClose={onClose} title={data ? data.cliente.nombreCliente : "Cliente"}>
-      {loading && !data && <Skeleton height={220} />}
-      {error && <p className="error-text">{error}</p>}
-      {data && (
-        <InteresesReunionesPanel
-          numeroDocumentoCliente={data.cliente.numeroDocumentoCliente}
-          idOrdenServicio={data.cliente.ordenVigente.idOrdenServicio}
-          ejecutivoDefault={data.cliente.ordenVigente.ejecutivo}
-          catalogo={data.intereses.catalogo}
-          marcados={data.intereses.marcados}
-          reuniones={data.reuniones}
-          onChanged={refetch}
-        />
-      )}
-    </Drawer>
-  );
-}
-
 export function AlertasPage() {
   const [nivel, setNivel] = useState<NivelAlerta | "">("");
   const [tipo, setTipo] = useState("");
@@ -102,13 +70,22 @@ export function AlertasPage() {
 
   const columns: DataTableColumn<ClienteAlertas>[] = useMemo(
     () => [
+      columnaAccionesCliente<ClienteAlertas>(
+        (g) => g.numeroDocumentoCliente,
+        setClienteSeleccionado
+      ),
       { key: "nivel", label: "Peor nivel", render: (g) => <NivelAlertaPill nivel={g.peorNivel} /> },
       {
         key: "cliente",
         label: "Cliente",
-        render: (g) => <Link to={`/clientes/${g.numeroDocumentoCliente}`}>{g.nombreCliente}</Link>,
+        render: (g) => (
+          <ClienteCell
+            numeroDocumentoCliente={g.numeroDocumentoCliente}
+            nombreCliente={g.nombreCliente}
+            sistemas={g.sistemas}
+          />
+        ),
       },
-      { key: "ruc", label: "RUC/DNI", render: (g) => g.numeroDocumentoCliente },
       {
         key: "cantidad",
         label: "Alertas",
@@ -129,20 +106,6 @@ export function AlertasPage() {
               </div>
             ))}
           </div>
-        ),
-      },
-      {
-        key: "acciones",
-        label: "Acciones",
-        align: "center",
-        render: (g) => (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setClienteSeleccionado(g.numeroDocumentoCliente)}
-          >
-            Reunión / interés
-          </button>
         ),
       },
     ],

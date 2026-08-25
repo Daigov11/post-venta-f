@@ -78,10 +78,22 @@ export interface Ubicacion {
   distrito: string;
 }
 
+export interface ClienteSistemas {
+  apiWorking: number;
+  apiLoyalty: boolean;
+  donChat: boolean;
+  sireContable: boolean;
+  apiReview: boolean;
+  pos: boolean;
+}
+
 export interface PostVentaCliente {
   numeroDocumentoCliente: string;
   nombreCliente: string;
+  sistemas: ClienteSistemas;
   telefono: string | null;
+  telefonoManual: string | null;
+  telefonoEfectivo: string | null;
   ubicacion: Ubicacion | { raw: string } | null;
 
   ordenVigente: OsRefResumen;
@@ -124,6 +136,8 @@ export interface PostVentaCliente {
   rubro: string | "No determinado";
   cantidadTrabajadores: number | null;
   cantidadTrabajadoresActualizadoEn: string | null;
+  usuarios: string[];
+  baseDatos: string | null;
   diasSinActividad: number | null;
 
   metadata: {
@@ -152,6 +166,50 @@ export interface ClientesQueryResult {
   total: number;
 }
 
+// Resumen liviano para el mini-modulo "Dados de baja" de Clientes — no es un
+// PostVentaCliente completo, solo lo necesario para esa lista.
+// Referencia historica importada de clientes_de_baja.xlsx — seguimiento que
+// ya se le hizo a este cliente ANTES de esta plataforma. Solo lectura, null
+// si no aparecia en ese excel.
+export interface BajaHistorico {
+  numeroDocumentoCliente: string;
+  idOrdenServicio: number;
+  fechaBajaSuspension: string | null;
+  fechaSeguimiento: string | null;
+  medioComunicacion: string | null;
+  resumenSeguimiento: string | null;
+  estadoSeguimiento: string | null;
+  estadoActual: string | null;
+  observacionEncargado: string | null;
+  fechaObservacionEncargado: string | null;
+  resumenSeguimientoEncargado: string | null;
+  fechaSeguimientoEncargado: string | null;
+  estadoSeguimientoEncargado: string | null;
+  medioComunicacionEncargado: string | null;
+}
+
+export interface ClienteBajaResumen {
+  numeroDocumentoCliente: string;
+  nombreCliente: string;
+  sistemas: ClienteSistemas;
+  planActual: { nombre: string; periodicidad: Periodicidad };
+  deudaTotal: number;
+  ejecutivo: string | null;
+  fechaBaja: string | null;
+  historico: BajaHistorico | null;
+}
+
+export interface ClientesBajaQueryResult {
+  data: ClienteBajaResumen[];
+  page: number;
+  pageSize: number;
+  total: number;
+  // Solo presente cuando se filtra por periodo: clientes dados de baja cuya
+  // fecha todavia no se verifico contra APIWorking, por lo tanto no pueden
+  // evaluarse contra el rango elegido y quedan fuera de "total".
+  pendientesVerificar?: number;
+}
+
 export interface FichaClienteResponse {
   cliente: PostVentaCliente;
   notas: Nota[];
@@ -160,6 +218,7 @@ export interface FichaClienteResponse {
   oportunidades: Oportunidad[];
   intereses: { catalogo: InteresCatalogo[]; marcados: number[] };
   reuniones: Reunion[];
+  seguimientoPostVenta: SeguimientoResumen | null;
 }
 
 export interface InteresCatalogo {
@@ -212,6 +271,9 @@ export interface PostVentaConfigValues {
   "renovacion.alerta_semestral_dias": number;
   "renovacion.alerta_anual_dias": number;
   "actividad.dias_sin_uso_alerta": number;
+  "seguimiento.dias_etapa2": number;
+  "seguimiento.dias_etapa3": number;
+  "seguimiento.fecha_corte_clientes_nuevos": string;
 }
 
 export interface Alerta {
@@ -222,6 +284,7 @@ export interface Alerta {
   mensaje: string;
   cliente: string;
   nombreCliente: string;
+  sistemas: ClienteSistemas;
   idOrdenServicio: number | null;
   fecha: string;
   origen: string;
@@ -235,6 +298,7 @@ export interface Oportunidad {
   mensaje: string;
   cliente: string;
   nombreCliente: string;
+  sistemas: ClienteSistemas;
   idOrdenServicio: number | null;
   valorEstimado: number | "No determinado";
   fecha: string;
@@ -312,4 +376,102 @@ export interface DashboardKpis {
   distribucionDepartamentos: { departamento: string; count: number }[];
   alertasPorNivel: { INFO: number; WARNING: number; CRITICAL: number };
   oportunidadesPorTipo: Record<string, number>;
+}
+
+// Historial de seguimiento (Administrativo/historial-seguimiento, origen=1 —
+// Orden de Servicio). Bitacora real de APIWorking: cada cambio de estado,
+// quien lo hizo y una observacion libre.
+export interface HistorialSeguimientoEvento {
+  fecha: string | null;
+  idEstado: number;
+  estado: string;
+  persona: string;
+  observacion: string;
+}
+
+// Incidencias (Administrativo/incidencias) — a diferencia del historial de
+// seguimiento, tiene estado de resolucion real: `resuelta` viene de
+// condicion "C" (cerrada) vs "A" (abierta) en la API externa.
+export interface Incidencia {
+  idIncidencia: number;
+  idOrdenServicio: number;
+  numeroOs: string;
+  fecha: string | null;
+  caso: string;
+  tipo: string;
+  estado: string;
+  resuelta: boolean;
+  asignadoPor: string;
+  asignadoA: string;
+  aCargo: string;
+  telefono: string | null;
+  descripcion: string;
+  reportadoPorCliente: boolean;
+  automatico: boolean;
+}
+
+export interface IncidenciasResponse {
+  data: Incidencia[];
+  total: number;
+  abiertas: number;
+  resueltas: number;
+}
+
+// ---------------------------------------------------------------------------
+// Seguimiento Post Venta ("Meta Team") — onboarding de clientes recien
+// capacitados en 3 rondas de contacto (bienvenida, +15 dias, +30 dias).
+// ---------------------------------------------------------------------------
+export type EstadoPipelineSeguimiento = "EN_PROCESO" | "EXITOSO" | "REQUIERE_ATENCION";
+export type OrigenSeguimiento = "AUTOMATICO" | "IMPORTADO_EXCEL";
+
+export interface SeguimientoCliente {
+  id: number;
+  numeroDocumentoCliente: string;
+  idOrdenServicio: number;
+  fechaInicio: string;
+  estadoPipeline: EstadoPipelineSeguimiento;
+  origen: OrigenSeguimiento;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SeguimientoEtapa {
+  id: number;
+  seguimientoClienteId: number;
+  etapa: 1 | 2 | 3;
+  fechaRealizado: string | null;
+  medioComunicacion: string | null;
+  estadoSeguimiento: string | null;
+  resumen: string | null;
+  solicitudCliente: string | null;
+  usuario: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EtapaActualInfo {
+  etapa: 1 | 2 | 3;
+  label: string;
+  diasParaSiguiente: number | null;
+  vencida: boolean;
+}
+
+export interface SeguimientoResumen {
+  numeroDocumentoCliente: string;
+  nombreCliente: string;
+  plan: string;
+  sistemas: ClienteSistemas;
+  ejecutivo: string | null;
+  origen: OrigenSeguimiento;
+  estadoPipeline: EstadoPipelineSeguimiento;
+  fechaInicio: string;
+  etapaActual: EtapaActualInfo | null;
+}
+
+export interface SeguimientoDetalle {
+  cliente: SeguimientoCliente;
+  etapas: SeguimientoEtapa[];
+  etapaActual: EtapaActualInfo | null;
+  incidencias: HistorialSeguimientoEvento[];
+  notas: Nota[];
 }

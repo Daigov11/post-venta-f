@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { AccionesClienteDrawer, columnaAccionesCliente } from "../components/panels/AccionesClienteDrawer";
+import { ClienteCell } from "../components/ui/ClienteCell";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { useOportunidades } from "../hooks/useOportunidades";
@@ -13,25 +14,38 @@ const TIPOS = [
   { value: "ALTO_VOLUMEN", label: "Alto volumen histórico" },
 ];
 
-const columns: DataTableColumn<Oportunidad>[] = [
-  { key: "titulo", label: "Oportunidad", render: (o) => <strong>{o.titulo}</strong> },
-  { key: "mensaje", label: "Detalle", render: (o) => o.mensaje },
-  {
-    key: "cliente",
-    label: "Cliente",
-    render: (o) => <Link to={`/clientes/${o.cliente}`}>{o.nombreCliente}</Link>,
-  },
-  {
-    key: "valor",
-    label: "Valor estimado",
-    align: "right",
-    render: (o) => formatValorEstimado(o.valorEstimado),
-  },
-];
+function buildColumns(
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void
+): DataTableColumn<Oportunidad>[] {
+  return [
+    columnaAccionesCliente<Oportunidad>((o) => o.cliente, onAbrirAcciones),
+    { key: "titulo", label: "Oportunidad", render: (o) => <strong>{o.titulo}</strong> },
+    { key: "mensaje", label: "Detalle", render: (o) => o.mensaje },
+    {
+      key: "cliente",
+      label: "Cliente",
+      render: (o) => (
+        <ClienteCell
+          numeroDocumentoCliente={o.cliente}
+          nombreCliente={o.nombreCliente}
+          sistemas={o.sistemas}
+        />
+      ),
+    },
+    {
+      key: "valor",
+      label: "Valor estimado",
+      align: "right",
+      render: (o) => formatValorEstimado(o.valorEstimado),
+    },
+  ];
+}
 
 export function OportunidadesPage() {
   const [tipo, setTipo] = useState("");
   const { data, loading, error } = useOportunidades({ tipo: tipo || undefined });
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
+  const columns = useMemo(() => buildColumns(setClienteSeleccionado), []);
 
   return (
     <div>
@@ -69,6 +83,14 @@ export function OportunidadesPage() {
           emptyMessage="No hay oportunidades para este filtro."
         />
       </div>
+
+      {clienteSeleccionado && (
+        <AccionesClienteDrawer
+          key={clienteSeleccionado}
+          numeroDocumentoCliente={clienteSeleccionado}
+          onClose={() => setClienteSeleccionado(null)}
+        />
+      )}
     </div>
   );
 }

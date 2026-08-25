@@ -4,6 +4,7 @@ import { NotaForm } from "../components/forms/NotaForm";
 import { SeguimientoForm } from "../components/forms/SeguimientoForm";
 import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
+import { SeguimientoPostVentaDrawer } from "../components/panels/SeguimientoPostVentaDrawer";
 import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -13,9 +14,17 @@ import { useAuth } from "../context/AuthContext";
 import { useCliente } from "../hooks/useCliente";
 import { useSeguimientos } from "../hooks/useSeguimientos";
 import { refreshSystemUsersOne, updateClienteMetadata } from "../services/clientes";
+import { getHistorialSeguimiento } from "../services/historial";
+import { getIncidencias } from "../services/incidencias";
 import { createNota } from "../services/notas";
 import { createSeguimiento, createTarea, updateTarea } from "../services/tareas";
-import type { EstadoPostVenta, EstadoTarea, Tarea } from "../types/postventaCliente";
+import type {
+  EstadoPostVenta,
+  EstadoTarea,
+  HistorialSeguimientoEvento,
+  Incidencia,
+  Tarea,
+} from "../types/postventaCliente";
 import { formatCurrency, formatNumber, formatValorEstimado } from "../utils/format";
 import "./ClienteFicha.css";
 
@@ -26,6 +35,27 @@ const ESTADO_TAREA_LABEL: Record<EstadoTarea, string> = {
   COMPLETADA: "Completada",
   CANCELADA: "Cancelada",
 };
+
+// El historial de seguimiento trae ~30 nestado distintos, propios del motor
+// de estados interno de APIWorking — no tenemos un catalogo confiable de que
+// significa cada uno. Solo se colorean los 2 que ya usamos en otro lado de la
+// app con ese mismo significado (esProblema en Renovaciones usa literalmente
+// "SUSPENDIDO POR PAGO"); el resto queda neutral en vez de inventar semántica.
+function HistorialEstadoBadge({ estado }: { estado: string }) {
+  if (estado === "SUSPENDIDO POR PAGO") return <Badge tone="critical">{estado}</Badge>;
+  if (estado === "COBRANZA") return <Badge tone="success">{estado}</Badge>;
+  return <Badge tone="neutral">{estado || "Sin estado"}</Badge>;
+}
+
+function IncidenciaEstadoBadge({ resuelta }: { resuelta: boolean }) {
+  return resuelta ? (
+    <Badge tone="success">Resuelta</Badge>
+  ) : (
+    <Badge tone="warning">Abierta</Badge>
+  );
+}
+
+type FichaTab = "resumen" | "actividad" | "historial" | "notas";
 
 function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }) {
   const [expanded, setExpanded] = useState(false);
@@ -106,9 +136,11 @@ export function ClienteFichaPage() {
   const { numeroDocumentoCliente = "" } = useParams();
   const { username } = useAuth();
   const { data, loading, error, refetch } = useCliente(numeroDocumentoCliente);
+  const [tab, setTab] = useState<FichaTab>("resumen");
   const [notaDrawerOpen, setNotaDrawerOpen] = useState(false);
   const [tareaDrawerOpen, setTareaDrawerOpen] = useState(false);
   const [interesesDrawerOpen, setInteresesDrawerOpen] = useState(false);
+  const [seguimientoPvDrawerOpen, setSeguimientoPvDrawerOpen] = useState(false);
   const [savingNota, setSavingNota] = useState(false);
   const [savingTarea, setSavingTarea] = useState(false);
 
@@ -118,6 +150,42 @@ export function ClienteFichaPage() {
   const [estadoManual, setEstadoManual] = useState<EstadoPostVenta | "">("");
   const [savingMetadata, setSavingMetadata] = useState(false);
   const [refreshingTrabajadores, setRefreshingTrabajadores] = useState(false);
+  const [editingTelefono, setEditingTelefono] = useState(false);
+  const [telefonoInput, setTelefonoInput] = useState("");
+  const [savingTelefono, setSavingTelefono] = useState(false);
+
+  const [historial, setHistorial] = useState<HistorialSeguimientoEvento[] | null>(null);
+  const [loadingHistorial, setLoadingHistorial] = useState(false);
+  const [errorHistorial, setErrorHistorial] = useState<string | null>(null);
+
+  const [incidenciasResp, setIncidenciasResp] = useState<{
+    data: Incidencia[];
+    total: number;
+    abiertas: number;
+    resueltas: number;
+  } | null>(null);
+  const [loadingIncidencias, setLoadingIncidencias] = useState(false);
+  const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
+
+  const [usuarioCopiado, setUsuarioCopiado] = useState<string | null>(null);
+  async function handleCopiar(texto: string, marcador: string) {
+    await navigator.clipboard.writeText(texto);
+    setUsuarioCopiado(marcador);
+    setTimeout(() => setUsuarioCopiado((actual) => (actual === marcador ? null : actual)), 1500);
+  }
+
+  async function handleSaveTelefono() {
+    setSavingTelefono(true);
+    try {
+      await updateClienteMetadata(numeroDocumentoCliente, {
+        telefonoManual: telefonoInput.trim() || null,
+      });
+      setEditingTelefono(false);
+      refetch();
+    } finally {
+      setSavingTelefono(false);
+    }
+  }
 
   async function handleRefreshTrabajadores() {
     setRefreshingTrabajadores(true);
@@ -135,7 +203,19 @@ export function ClienteFichaPage() {
     setEtiquetasText(data.cliente.etiquetas.join(", "));
     setObservacionGeneral(data.cliente.observacionGeneral ?? "");
     setEstadoManual(data.cliente.estadoPostVentaManual ?? "");
+    setTelefonoInput(data.cliente.telefonoEfectivo ?? "");
   }, [data]);
+
+  // Se resetea al cambiar de cliente para no arrastrar el historial del
+  // anterior mientras carga el nuevo (el fetch es manual, no automatico).
+  useEffect(() => {
+    setHistorial(null);
+    setErrorHistorial(null);
+    setIncidenciasResp(null);
+    setErrorIncidencias(null);
+    setTab("resumen");
+    setEditingTelefono(false);
+  }, [numeroDocumentoCliente]);
 
   async function handleSaveMetadata(event: FormEvent) {
     event.preventDefault();
@@ -197,8 +277,8 @@ export function ClienteFichaPage() {
     return <p className="error-text">{error ?? "Cliente no encontrado"}</p>;
   }
 
-  const { cliente, notas, tareas, alertas, oportunidades } = data;
-  const telefonoLimpio = cliente.telefono?.replace(/\D/g, "");
+  const { cliente, notas, tareas, alertas, oportunidades, seguimientoPostVenta } = data;
+  const telefonoLimpio = cliente.telefonoEfectivo?.replace(/\D/g, "");
   const ultimoPago = cliente.ordenVigente.pagos
     .filter((p) => p.fechaEmitido !== null)
     .reduce<(typeof cliente.ordenVigente.pagos)[number] | null>(
@@ -207,6 +287,32 @@ export function ClienteFichaPage() {
       null
     );
 
+  async function handleCargarHistorial() {
+    setLoadingHistorial(true);
+    setErrorHistorial(null);
+    try {
+      const res = await getHistorialSeguimiento(cliente.ordenVigente.idOrdenServicio);
+      setHistorial(res.data);
+    } catch {
+      setErrorHistorial("No se pudo cargar el historial de seguimiento.");
+    } finally {
+      setLoadingHistorial(false);
+    }
+  }
+
+  async function handleCargarIncidencias() {
+    setLoadingIncidencias(true);
+    setErrorIncidencias(null);
+    try {
+      const res = await getIncidencias(cliente.numeroDocumentoCliente);
+      setIncidenciasResp(res);
+    } catch {
+      setErrorIncidencias("No se pudo cargar las incidencias.");
+    } finally {
+      setLoadingIncidencias(false);
+    }
+  }
+
   return (
     <div>
       <div className="card ficha-header">
@@ -214,7 +320,60 @@ export function ClienteFichaPage() {
           <h1>{cliente.nombreCliente}</h1>
           <div className="ficha-header-meta">
             RUC/DNI {cliente.numeroDocumentoCliente}
-            {cliente.telefono ? ` · Tel. ${cliente.telefono}` : ""}
+            {" · "}
+            {editingTelefono ? (
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={telefonoInput}
+                  onChange={(e) => setTelefonoInput(e.target.value)}
+                  placeholder="Número de teléfono"
+                  style={{ width: 150 }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ padding: "2px 10px", fontSize: 13 }}
+                  onClick={handleSaveTelefono}
+                  disabled={savingTelefono}
+                >
+                  {savingTelefono ? "Guardando..." : "Guardar"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ padding: "2px 10px", fontSize: 13 }}
+                  onClick={() => {
+                    setEditingTelefono(false);
+                    setTelefonoInput(cliente.telefonoEfectivo ?? "");
+                  }}
+                >
+                  Cancelar
+                </button>
+              </span>
+            ) : (
+              <span>
+                Tel. {cliente.telefonoEfectivo ?? "No registrado"}
+                {cliente.telefonoManual ? " (corregido)" : ""}
+                <button
+                  type="button"
+                  onClick={() => setEditingTelefono(true)}
+                  style={{
+                    marginLeft: 6,
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    color: "var(--color-primary-700, #2563eb)",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    font: "inherit",
+                  }}
+                >
+                  Editar
+                </button>
+              </span>
+            )}
           </div>
           <div className="ficha-header-badges">
             <EstadoPostVentaPill
@@ -267,6 +426,40 @@ export function ClienteFichaPage() {
         </div>
       </div>
 
+      <div className="clientes-toolbar" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className={tab === "resumen" ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setTab("resumen")}
+          >
+            Resumen
+          </button>
+          <button
+            type="button"
+            className={tab === "actividad" ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setTab("actividad")}
+          >
+            Actividad y seguimiento
+          </button>
+          <button
+            type="button"
+            className={tab === "historial" ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setTab("historial")}
+          >
+            Historial
+          </button>
+          <button
+            type="button"
+            className={tab === "notas" ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setTab("notas")}
+          >
+            Notas y tareas ({tareas.length + notas.length})
+          </button>
+        </div>
+      </div>
+
+      {tab === "resumen" && (
       <div className="ficha-grid">
         <section className="card ficha-section">
           <h2>Resumen</h2>
@@ -533,7 +726,11 @@ export function ClienteFichaPage() {
             </div>
           </div>
         </section>
+      </div>
+      )}
 
+      {tab === "actividad" && (
+      <div className="ficha-grid">
         <section className="card ficha-section">
           <h2>Trabajadores</h2>
           <p className="muted">Aproximado por los usuarios registrados en el sistema del cliente.</p>
@@ -555,6 +752,24 @@ export function ClienteFichaPage() {
               </div>
             )}
           </div>
+
+          {cliente.usuarios.length > 0 && (
+            <div className="usuarios-list">
+              {cliente.usuarios.map((usuario) => (
+                <div key={usuario} className="usuarios-list-item">
+                  <code>{usuario}</code>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => handleCopiar(usuario, usuario)}
+                  >
+                    {usuarioCopiado === usuario ? "Copiado ✓" : "Copiar"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 8 }}>
             <button
               type="button"
@@ -564,17 +779,34 @@ export function ClienteFichaPage() {
             >
               {refreshingTrabajadores ? "Actualizando..." : "Actualizar"}
             </button>
+            {cliente.usuarios.length > 0 && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => handleCopiar(cliente.usuarios.join("\n"), "__todos__")}
+              >
+                {usuarioCopiado === "__todos__" ? "Copiado ✓" : "Copiar todos"}
+              </button>
+            )}
           </div>
         </section>
 
         <section className="card ficha-section">
           <h2>Actividad del sistema</h2>
-          <p className="muted">
-            Aproximado — se basa en cuándo quedó inactiva la última sesión, no es una fecha de baja.
-          </p>
+          <p className="muted">Último ingreso registrado por el cliente en su sistema.</p>
           <div className="ficha-field-list">
             <div className="ficha-field-row">
-              <span className="ficha-field-label">Sin actividad hace</span>
+              <span className="ficha-field-label">Último ingreso</span>
+              <span className="ficha-field-value">
+                {cliente.ordenVigente.postVentaExtra?.fechaInactivo
+                  ? new Date(cliente.ordenVigente.postVentaExtra.fechaInactivo).toLocaleString(
+                      "es-PE"
+                    )
+                  : "Sin datos"}
+              </span>
+            </div>
+            <div className="ficha-field-row">
+              <span className="ficha-field-label">Hace</span>
               <span className="ficha-field-value">
                 {cliente.diasSinActividad === null ? (
                   "Sin datos"
@@ -590,6 +822,64 @@ export function ClienteFichaPage() {
           </div>
         </section>
 
+        {seguimientoPostVenta && (
+          <section className="card ficha-section">
+            <h2>Seguimiento Post Venta</h2>
+            <p className="muted">
+              Onboarding de cliente recién capacitado ({seguimientoPostVenta.origen === "AUTOMATICO" ? "flujo automático" : "importado del Excel de Ligia"}).
+            </p>
+            <div className="ficha-field-list">
+              <div className="ficha-field-row">
+                <span className="ficha-field-label">Estado</span>
+                <span className="ficha-field-value">
+                  <Badge
+                    tone={
+                      seguimientoPostVenta.estadoPipeline === "EXITOSO"
+                        ? "success"
+                        : seguimientoPostVenta.estadoPipeline === "REQUIERE_ATENCION"
+                          ? "critical"
+                          : "neutral"
+                    }
+                  >
+                    {seguimientoPostVenta.estadoPipeline === "EXITOSO"
+                      ? "Cliente exitoso"
+                      : seguimientoPostVenta.estadoPipeline === "REQUIERE_ATENCION"
+                        ? "Requiere atención"
+                        : "En proceso"}
+                  </Badge>
+                </span>
+              </div>
+              {seguimientoPostVenta.etapaActual && (
+                <div className="ficha-field-row">
+                  <span className="ficha-field-label">Etapa actual</span>
+                  <span className="ficha-field-value">
+                    {seguimientoPostVenta.etapaActual.label}
+                    {seguimientoPostVenta.etapaActual.vencida && (
+                      <>
+                        {" "}
+                        <Badge tone="warning">Toca contactar</Badge>
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 8 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSeguimientoPvDrawerOpen(true)}
+              >
+                Ver / registrar seguimiento
+              </button>
+            </div>
+          </section>
+        )}
+      </div>
+      )}
+
+      {tab === "resumen" && (
+      <div className="ficha-grid">
         <section className="card ficha-section">
           <h2>Financiero</h2>
           <div className="ficha-field-list">
@@ -719,10 +1009,14 @@ export function ClienteFichaPage() {
             </div>
           </form>
         </section>
+      </div>
+      )}
 
+      {tab === "historial" && (
+      <div className="ficha-grid">
         <section className="card ficha-section">
           <h2>Datos aún no disponibles</h2>
-          <EmptyState message="Último login, historial de estados, renovaciones, módulos, incidencias, contactos efectivos y encuestas quedarán disponibles cuando APIWorking entregue los endpoints correspondientes." />
+          <EmptyState message="Último login, renovaciones, módulos y encuestas quedarán disponibles cuando APIWorking entregue los endpoints correspondientes. Historial de estados, contacto efectivo (llamadas) e incidencias ya se ven en 'Incidencias' e 'Historial de seguimiento' más abajo." />
         </section>
 
         <section className="card ficha-section ficha-full-width">
@@ -742,6 +1036,101 @@ export function ClienteFichaPage() {
           </div>
         </section>
 
+        <section className="card ficha-section ficha-full-width">
+          <h2>Incidencias{incidenciasResp ? ` (${incidenciasResp.total})` : ""}</h2>
+          <p className="muted">
+            Incidencias reportadas para este cliente en APIWorking, con su estado real de
+            resolución.
+          </p>
+          {incidenciasResp === null && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleCargarIncidencias}
+              disabled={loadingIncidencias}
+            >
+              {loadingIncidencias ? "Cargando..." : "Ver incidencias"}
+            </button>
+          )}
+          {errorIncidencias && <p className="error-text">{errorIncidencias}</p>}
+          {incidenciasResp !== null && incidenciasResp.total > 0 && (
+            <p className="muted">
+              {incidenciasResp.abiertas} abierta(s) · {incidenciasResp.resueltas} resuelta(s)
+            </p>
+          )}
+          {incidenciasResp !== null && incidenciasResp.total === 0 && (
+            <EmptyState title="Sin incidencias registradas" />
+          )}
+          {incidenciasResp !== null && incidenciasResp.data.length > 0 && (
+            <div className="ficha-field-list">
+              {incidenciasResp.data.map((inc) => (
+                <div key={inc.idIncidencia} className="historial-seguimiento-item">
+                  <div className="historial-seguimiento-item-header">
+                    <IncidenciaEstadoBadge resuelta={inc.resuelta} />
+                    <Badge tone="neutral">{inc.tipo || "Sin tipo"}</Badge>
+                    <span className="historial-seguimiento-item-fecha">
+                      {inc.fecha ? new Date(inc.fecha).toLocaleString("es-PE") : "Sin fecha"}
+                    </span>
+                  </div>
+                  {inc.caso && <div className="historial-seguimiento-item-obs">{inc.caso}</div>}
+                  {inc.descripcion && inc.descripcion !== inc.caso && (
+                    <div className="historial-seguimiento-item-obs">{inc.descripcion}</div>
+                  )}
+                  <div className="historial-seguimiento-item-persona">
+                    Asignado a {inc.asignadoA || "—"}
+                    {inc.aCargo && inc.aCargo !== "SIN ASIGNAR" && ` · A cargo de ${inc.aCargo}`}
+                    {inc.reportadoPorCliente && " · Reportada por el cliente"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="card ficha-section ficha-full-width">
+          <h2>Historial de seguimiento{historial ? ` (${historial.length})` : ""}</h2>
+          <p className="muted">
+            Bitácora real de APIWorking para la OS vigente ({cliente.ordenVigente.numeroOs}) —
+            cambios de estado, llamadas al cliente e incidencias registradas por el equipo.
+          </p>
+          {historial === null && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleCargarHistorial}
+              disabled={loadingHistorial}
+            >
+              {loadingHistorial ? "Cargando..." : "Ver historial completo"}
+            </button>
+          )}
+          {errorHistorial && <p className="error-text">{errorHistorial}</p>}
+          {historial !== null && historial.length === 0 && (
+            <EmptyState title="Sin historial registrado" />
+          )}
+          {historial !== null && historial.length > 0 && (
+            <div className="ficha-field-list">
+              {historial.map((ev, i) => (
+                <div key={`${ev.fecha ?? "sf"}-${i}`} className="historial-seguimiento-item">
+                  <div className="historial-seguimiento-item-header">
+                    <HistorialEstadoBadge estado={ev.estado} />
+                    <span className="historial-seguimiento-item-fecha">
+                      {ev.fecha ? new Date(ev.fecha).toLocaleString("es-PE") : "Sin fecha"}
+                    </span>
+                  </div>
+                  {ev.observacion && (
+                    <div className="historial-seguimiento-item-obs">{ev.observacion}</div>
+                  )}
+                  <div className="historial-seguimiento-item-persona">{ev.persona || "—"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+      )}
+
+      {tab === "resumen" && (
+      <div className="ficha-grid">
         <section className="card ficha-section ficha-full-width">
           <h2>Alertas</h2>
           {alertas.length === 0 ? (
@@ -767,7 +1156,11 @@ export function ClienteFichaPage() {
             ))
           )}
         </section>
+      </div>
+      )}
 
+      {tab === "notas" && (
+      <div className="ficha-grid">
         <section className="card ficha-section ficha-full-width">
           <h2>Tareas ({tareas.length})</h2>
           {tareas.length === 0 ? (
@@ -799,6 +1192,7 @@ export function ClienteFichaPage() {
           )}
         </section>
       </div>
+      )}
 
       <Drawer open={notaDrawerOpen} onClose={() => setNotaDrawerOpen(false)} title="Registrar nota">
         <NotaForm
@@ -826,12 +1220,24 @@ export function ClienteFichaPage() {
           numeroDocumentoCliente={cliente.numeroDocumentoCliente}
           idOrdenServicio={cliente.ordenVigente.idOrdenServicio}
           ejecutivoDefault={cliente.ordenVigente.ejecutivo}
+          telefono={cliente.telefonoEfectivo}
+          telefonoManual={cliente.telefonoManual}
           catalogo={data.intereses.catalogo}
           marcados={data.intereses.marcados}
           reuniones={data.reuniones}
           onChanged={refetch}
         />
       </Drawer>
+
+      {seguimientoPvDrawerOpen && (
+        <SeguimientoPostVentaDrawer
+          numeroDocumentoCliente={cliente.numeroDocumentoCliente}
+          onClose={() => {
+            setSeguimientoPvDrawerOpen(false);
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

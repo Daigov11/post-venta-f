@@ -1,10 +1,14 @@
 import axios from "axios";
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge } from "../ui/Badge";
+import { EmptyState } from "../ui/EmptyState";
+import { updateClienteMetadata } from "../../services/clientes";
 import { createInteres, setClienteIntereses } from "../../services/intereses";
+import { getHistorialSeguimiento } from "../../services/historial";
 import { createReunion, getDisponibilidad, updateReunionEstado } from "../../services/reuniones";
 import type {
   EstadoReunion,
+  HistorialSeguimientoEvento,
   InteresCatalogo,
   ModalidadReunion,
   Reunion,
@@ -128,6 +132,8 @@ export function InteresesReunionesPanel({
   numeroDocumentoCliente,
   idOrdenServicio,
   ejecutivoDefault,
+  telefono,
+  telefonoManual,
   catalogo,
   marcados,
   reuniones,
@@ -136,11 +142,54 @@ export function InteresesReunionesPanel({
   numeroDocumentoCliente: string;
   idOrdenServicio: number;
   ejecutivoDefault: string | null;
+  telefono?: string | null;
+  telefonoManual?: string | null;
   catalogo: InteresCatalogo[];
   marcados: number[];
   reuniones: Reunion[];
   onChanged: () => void;
 }) {
+  const [editingTelefono, setEditingTelefono] = useState(false);
+  const [telefonoInput, setTelefonoInput] = useState(telefono ?? "");
+  const [savingTelefono, setSavingTelefono] = useState(false);
+
+  useEffect(() => {
+    setTelefonoInput(telefono ?? "");
+    setEditingTelefono(false);
+  }, [numeroDocumentoCliente, telefono]);
+
+  async function handleGuardarTelefono() {
+    setSavingTelefono(true);
+    try {
+      await updateClienteMetadata(numeroDocumentoCliente, {
+        telefonoManual: telefonoInput.trim() || null,
+      });
+      setEditingTelefono(false);
+      onChanged();
+    } finally {
+      setSavingTelefono(false);
+    }
+  }
+
+  const [incidencias, setIncidencias] = useState<HistorialSeguimientoEvento[] | null>(null);
+  const [loadingIncidencias, setLoadingIncidencias] = useState(false);
+  const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
+
+  async function handleVerIncidencias() {
+    setLoadingIncidencias(true);
+    setErrorIncidencias(null);
+    try {
+      const res = await getHistorialSeguimiento(idOrdenServicio);
+      setIncidencias(
+        res.data.filter((ev) => ev.estado.trim().toUpperCase().includes("INCIDENCIA"))
+      );
+    } catch {
+      setErrorIncidencias("No se pudieron cargar las incidencias.");
+    } finally {
+      setLoadingIncidencias(false);
+    }
+  }
+
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set(marcados));
   const [savingIntereses, setSavingIntereses] = useState(false);
 
@@ -275,6 +324,89 @@ export function InteresesReunionesPanel({
 
   return (
     <div className="stack-form">
+      {telefono !== undefined && (
+        <section>
+          <h3 style={{ marginBottom: 4 }}>Teléfono de contacto</h3>
+          {editingTelefono ? (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                type="text"
+                value={telefonoInput}
+                onChange={(e) => setTelefonoInput(e.target.value)}
+                placeholder="Número de teléfono"
+                style={{ width: 160 }}
+                autoFocus
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleGuardarTelefono}
+                disabled={savingTelefono}
+              >
+                {savingTelefono ? "Guardando..." : "Guardar"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  setEditingTelefono(false);
+                  setTelefonoInput(telefono ?? "");
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <p style={{ margin: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span>{telefono || "No registrado"}</span>
+              {telefonoManual && <Badge tone="info">corregido</Badge>}
+              <button type="button" className="btn btn-ghost" onClick={() => setEditingTelefono(true)}>
+                {telefono ? "Corregir" : "Agregar"}
+              </button>
+            </p>
+          )}
+          <p className="muted" style={{ marginTop: 4, fontSize: 13 }}>
+            Si al contactar al cliente resulta ser otro número, corregilo acá — se usará en
+            adelante para llamar y escribir por WhatsApp.
+          </p>
+        </section>
+      )}
+
+      <section>
+        <h3 style={{ marginBottom: 4 }}>
+          Incidencias{incidencias ? ` (${incidencias.length})` : ""}
+        </h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Para tener contexto antes de llamar o escribirle — viene del historial real de
+          APIWorking.
+        </p>
+        {incidencias === null && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleVerIncidencias}
+            disabled={loadingIncidencias}
+          >
+            {loadingIncidencias ? "Cargando..." : "Ver incidencias"}
+          </button>
+        )}
+        {errorIncidencias && <p className="error-text">{errorIncidencias}</p>}
+        {incidencias !== null && incidencias.length === 0 && (
+          <EmptyState title="Sin incidencias registradas" />
+        )}
+        {incidencias !== null && incidencias.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {incidencias.map((ev, i) => (
+              <div key={`inc-${ev.fecha ?? "sf"}-${i}`} style={{ fontSize: 13 }}>
+                <strong>{ev.fecha ? new Date(ev.fecha).toLocaleDateString("es-PE") : "Sin fecha"}</strong>
+                {" — "}
+                {ev.observacion || ev.estado}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
       <section>
         <h3 style={{ marginBottom: 4 }}>Intereses comerciales</h3>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>

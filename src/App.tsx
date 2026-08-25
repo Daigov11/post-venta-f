@@ -8,6 +8,7 @@ import { ClientesPage } from "./pages/Clientes";
 import { ConfiguracionPage } from "./pages/Configuracion";
 import { DashboardPage } from "./pages/Dashboard";
 import { LoginPage } from "./pages/Login";
+import { MovimientosPage } from "./pages/Movimientos";
 import { OportunidadesPage } from "./pages/Oportunidades";
 import { OrdenesPage } from "./pages/Ordenes";
 import { RenovacionesPage } from "./pages/Renovaciones";
@@ -32,6 +33,7 @@ function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/clientes" element={<ClientesPage />} />
         <Route path="/clientes/:numeroDocumentoCliente" element={<ClienteFichaPage />} />
+        <Route path="/movimientos" element={<MovimientosPage />} />
         <Route path="/alertas" element={<AlertasPage />} />
         <Route path="/oportunidades" element={<OportunidadesPage />} />
         <Route path="/renovaciones" element={<RenovacionesPage />} />

@@ -1,0 +1,15 @@
+/* Columna vertical, no grid — cada modulo expande a una tabla con varias
+   columnas, no cabe bien lado a lado. */
+.modulo-clientes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.modulo-clientes-periodo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}

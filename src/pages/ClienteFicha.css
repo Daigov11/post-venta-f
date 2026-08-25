@@ -190,3 +190,62 @@
 .interes-item-title {
   font-weight: 600;
 }
+
+.usuarios-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-3);
+}
+
+.usuarios-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 6px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-hover);
+}
+
+.usuarios-list-item code {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
+.historial-seguimiento-item {
+  border-left: 2px solid var(--color-border);
+  padding: 0 0 var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.historial-seguimiento-item:last-child {
+  margin-bottom: 0;
+}
+
+.historial-seguimiento-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.historial-seguimiento-item-fecha {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.historial-seguimiento-item-obs {
+  color: var(--color-text-primary);
+}
+
+.historial-seguimiento-item-persona {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}

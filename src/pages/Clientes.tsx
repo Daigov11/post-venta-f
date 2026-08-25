@@ -9,6 +9,7 @@ import { FilterBar } from "../components/ui/FilterBar";
 import { Pagination } from "../components/ui/Pagination";
 import { SearchInput } from "../components/ui/SearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
+import { SistemasBadges } from "../components/ui/SistemasBadges";
 import { EstadoPostVentaPill, SegmentoPill } from "../components/ui/StatusPill";
 import { SavedViewForm } from "../components/forms/SavedViewForm";
 import type { ClientesQueryParams } from "../services/clientes";
@@ -59,12 +60,13 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
     key: "cliente",
     label: "Cliente",
     sortable: true,
-    render: (c) => c.nombreCliente,
-  },
-  {
-    key: "ruc",
-    label: "RUC/DNI",
-    render: (c) => c.numeroDocumentoCliente,
+    render: (c) => (
+      <div className="cliente-cell">
+        <span className="cliente-cell-nombre">{c.nombreCliente}</span>
+        <span className="cliente-cell-ruc">{c.numeroDocumentoCliente}</span>
+        <SistemasBadges sistemas={c.sistemas} />
+      </div>
+    ),
   },
   {
     key: "os",
@@ -214,21 +216,12 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
 
 const COLUMN_OPTIONS: ColumnOption[] = ALL_COLUMNS.map((c) => ({ key: c.key, label: c.label }));
 
-// Set inicial reducido — con los 21 campos disponibles, mostrar todo de
-// entrada satura el cuadro. El resto sigue disponible en "Agregar/quitar
-// columnas", y cada usuario lo ajusta a su gusto (persistido en localStorage).
-const DEFAULT_VISIBLE_COLUMNS = [
-  "estado",
-  "segmento",
-  "cliente",
-  "ruc",
-  "rubro",
-  "plan",
-  "deuda",
-  "renovacion",
-  "alertas",
-  "ejecutivo",
-];
+// Set inicial minimo — con los 21 campos disponibles, mostrar todo de
+// entrada satura el cuadro. El resto (segmento, rubro, alertas, etc.) sigue
+// disponible en "Agregar/quitar columnas", y cada usuario lo ajusta a su
+// gusto (persistido en localStorage) — esto es solo lo que ve alguien que
+// nunca lo toco.
+const DEFAULT_VISIBLE_COLUMNS = ["estado", "cliente", "plan", "deuda", "renovacion", "ejecutivo"];
 
 interface FiltersState {
   search: string;
@@ -510,30 +503,6 @@ export function ClientesPage() {
             <option value="false">Sin deuda</option>
           </select>
         </div>
-        <div className="field">
-          <label htmlFor="filtro-equipo">Equipo</label>
-          <select
-            id="filtro-equipo"
-            value={filters.conEquipo}
-            onChange={(e) => updateFilter("conEquipo", e.target.value)}
-          >
-            <option value="">Todos</option>
-            <option value="true">Con equipo</option>
-            <option value="false">Sin equipo</option>
-          </select>
-        </div>
-        <div className="field">
-          <label htmlFor="filtro-doc">Documentación</label>
-          <select
-            id="filtro-doc"
-            value={filters.documentacionCompleta}
-            onChange={(e) => updateFilter("documentacionCompleta", e.target.value)}
-          >
-            <option value="">Todas</option>
-            <option value="true">Completa</option>
-            <option value="false">Incompleta</option>
-          </select>
-        </div>
         <button
           type="button"
           className="btn btn-ghost clientes-more-filters-toggle"
@@ -545,6 +514,30 @@ export function ClientesPage() {
 
       {showMoreFilters && (
         <FilterBar>
+          <div className="field">
+            <label htmlFor="filtro-equipo">Equipo</label>
+            <select
+              id="filtro-equipo"
+              value={filters.conEquipo}
+              onChange={(e) => updateFilter("conEquipo", e.target.value)}
+            >
+              <option value="">Todos</option>
+              <option value="true">Con equipo</option>
+              <option value="false">Sin equipo</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="filtro-doc">Documentación</label>
+            <select
+              id="filtro-doc"
+              value={filters.documentacionCompleta}
+              onChange={(e) => updateFilter("documentacionCompleta", e.target.value)}
+            >
+              <option value="">Todas</option>
+              <option value="true">Completa</option>
+              <option value="false">Incompleta</option>
+            </select>
+          </div>
           <div className="field">
             <label htmlFor="filtro-plan">Plan</label>
             <input
@@ -693,6 +686,8 @@ export function ClientesPage() {
             numeroDocumentoCliente={accionCliente.numeroDocumentoCliente}
             idOrdenServicio={accionCliente.ordenVigente.idOrdenServicio}
             ejecutivoDefault={accionCliente.ordenVigente.ejecutivo}
+            telefono={accionCliente.telefonoEfectivo}
+            telefonoManual={accionCliente.telefonoManual}
             catalogo={accionData.catalogo}
             marcados={accionData.marcados}
             reuniones={accionData.reuniones}

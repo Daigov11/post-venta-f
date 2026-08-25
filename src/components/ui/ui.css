@@ -304,6 +304,53 @@
   margin-top: var(--space-2);
 }
 
+/* CollapsibleCard */
+.collapsible-card {
+  padding: 0;
+  overflow: hidden;
+}
+.collapsible-card-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.collapsible-card-titulo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.collapsible-card-titulo > span:first-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-weight: 600;
+}
+.collapsible-card-subtitulo {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+}
+.collapsible-card-caret {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.collapsible-card-body {
+  padding: 0 var(--space-4) var(--space-4);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+}
+
 /* Layout genericos de pagina */
 .page-header {
   display: flex;
@@ -319,4 +366,55 @@
 .page-header-subtitle {
   color: var(--color-text-secondary);
   font-size: 0.88rem;
+}
+
+/* Cliente + RUC apilados con la fila de iconos de sistemas debajo */
+.cliente-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 160px;
+}
+.cliente-cell-nombre {
+  font-weight: 600;
+}
+.cliente-cell-ruc {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+
+.sistemas-badges {
+  display: flex;
+  gap: 3px;
+  margin-top: 2px;
+}
+.sistema-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 5px;
+  filter: grayscale(100%);
+  opacity: 0.32;
+}
+.sistema-badge.activo {
+  filter: none;
+  opacity: 1;
+  background: var(--color-primary-50);
+}
+.sistema-badge-count {
+  position: absolute;
+  bottom: -5px;
+  right: -6px;
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--color-primary-700);
+  color: var(--color-text-on-primary);
+  border-radius: 6px;
+  padding: 0 3px;
+  line-height: 1.4;
 }

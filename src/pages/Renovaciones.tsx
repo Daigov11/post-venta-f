@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { AccionesClienteDrawer, columnaAccionesCliente } from "../components/panels/AccionesClienteDrawer";
 import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { ClienteCell } from "../components/ui/ClienteCell";
+import { CollapsibleCard } from "../components/ui/CollapsibleCard";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { KpiCard } from "../components/ui/KpiCard";
@@ -151,15 +153,22 @@ function renderResumenMes(r: ResumenMesCliente) {
 function columnasCobranzaMensual(
   mesSeleccionado: MesInfo,
   ahora: Date,
-  esMesActual: boolean
+  esMesActual: boolean,
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void
 ): DataTableColumn<PostVentaCliente>[] {
   return [
+    columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
     {
       key: "cliente",
       label: "Cliente",
-      render: (c) => <Link to={`/clientes/${c.numeroDocumentoCliente}`}>{c.nombreCliente}</Link>,
+      render: (c) => (
+        <ClienteCell
+          numeroDocumentoCliente={c.numeroDocumentoCliente}
+          nombreCliente={c.nombreCliente}
+          sistemas={c.sistemas}
+        />
+      ),
     },
-    { key: "ruc", label: "RUC/DNI", render: (c) => c.numeroDocumentoCliente },
     {
       key: "monto",
       label: mesSeleccionado.label,
@@ -347,15 +356,25 @@ function exportarClientesCsv(
 }
 
 function columnasClientesResumenMes(
-  tipo: "yaRenovaron" | "faltanRenovar"
+  tipo: "yaRenovaron" | "faltanRenovar",
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void
 ): DataTableColumn<ClienteRenovacionMes>[] {
   return [
+    columnaAccionesCliente<ClienteRenovacionMes>(
+      (r) => r.cliente.numeroDocumentoCliente,
+      onAbrirAcciones
+    ),
     {
       key: "cliente",
       label: "Cliente",
-      render: (r) => <Link to={`/clientes/${r.cliente.numeroDocumentoCliente}`}>{r.cliente.nombreCliente}</Link>,
+      render: (r) => (
+        <ClienteCell
+          numeroDocumentoCliente={r.cliente.numeroDocumentoCliente}
+          nombreCliente={r.cliente.nombreCliente}
+          sistemas={r.cliente.sistemas}
+        />
+      ),
     },
-    { key: "ruc", label: "RUC/DNI", render: (r) => r.cliente.numeroDocumentoCliente },
     {
       key: "periodicidad",
       label: "Periodicidad",
@@ -437,14 +456,23 @@ function vencidaBadge(dias: number | null) {
   return <Badge tone="critical">{dias} día(s)</Badge>;
 }
 
-const columnasProximas: DataTableColumn<PostVentaCliente>[] = [
+function columnasProximas(
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void
+): DataTableColumn<PostVentaCliente>[] {
+  return [
+  columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
   { key: "renovacion", label: "Vence en", render: (c) => proximaBadge(c.diasParaRenovacion) },
   {
     key: "cliente",
     label: "Cliente",
-    render: (c) => <Link to={`/clientes/${c.numeroDocumentoCliente}`}>{c.nombreCliente}</Link>,
+    render: (c) => (
+      <ClienteCell
+        numeroDocumentoCliente={c.numeroDocumentoCliente}
+        nombreCliente={c.nombreCliente}
+        sistemas={c.sistemas}
+      />
+    ),
   },
-  { key: "ruc", label: "RUC/DNI", render: (c) => c.numeroDocumentoCliente },
   {
     key: "plan",
     label: "Plan",
@@ -480,16 +508,26 @@ const columnasProximas: DataTableColumn<PostVentaCliente>[] = [
       c.ingresoMensualReal == null ? "—" : formatCurrency(c.ingresoMensualReal),
   },
   { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
-];
+  ];
+}
 
-const columnasVencidas: DataTableColumn<PostVentaCliente>[] = [
+function columnasVencidas(
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void
+): DataTableColumn<PostVentaCliente>[] {
+  return [
+  columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
   { key: "vencido", label: "Vencido hace", render: (c) => vencidaBadge(c.diasVencido) },
   {
     key: "cliente",
     label: "Cliente",
-    render: (c) => <Link to={`/clientes/${c.numeroDocumentoCliente}`}>{c.nombreCliente}</Link>,
+    render: (c) => (
+      <ClienteCell
+        numeroDocumentoCliente={c.numeroDocumentoCliente}
+        nombreCliente={c.nombreCliente}
+        sistemas={c.sistemas}
+      />
+    ),
   },
-  { key: "ruc", label: "RUC/DNI", render: (c) => c.numeroDocumentoCliente },
   {
     key: "plan",
     label: "Plan",
@@ -523,7 +561,8 @@ const columnasVencidas: DataTableColumn<PostVentaCliente>[] = [
     ),
   },
   { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
-];
+  ];
+}
 
 export function RenovacionesPage() {
   const [vista, setVista] = useState<Vista>("proximas");
@@ -533,6 +572,8 @@ export function RenovacionesPage() {
   // es para mirar hacia adelante (ej. "que vence en setiembre"), lo de atras
   // ya lo cubren "Ya vencidas" y "Cobranza Mensual".
   const [mesFuturoOffset, setMesFuturoOffset] = useState(0);
+  const [panelAbierto, setPanelAbierto] = useState(true);
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
   // Sin filtro en el pedido: se trae todo una sola vez (el backend ya calcula
   // renovacionEnAlerta/proximaRenovacion/ultimoVencimientoPago por cliente) y
   // de ahi se derivan tanto los KPIs como ambas tablas.
@@ -569,7 +610,7 @@ export function RenovacionesPage() {
     return [...lista].sort((a, b) => b.monto - a.monto);
   }, [resumenPorPeriodicidad, vistaMesTipo, periodicidadFiltro]);
   const columnasClientesResumen = useMemo(
-    () => columnasClientesResumenMes(vistaMesTipo),
+    () => columnasClientesResumenMes(vistaMesTipo, setClienteSeleccionado),
     [vistaMesTipo]
   );
 
@@ -656,7 +697,7 @@ export function RenovacionesPage() {
   }, [mensuales, mesSeleccionado, ahora, esMesActual]);
 
   const columnasCobranza = useMemo(
-    () => columnasCobranzaMensual(mesSeleccionado, ahora, esMesActual),
+    () => columnasCobranzaMensual(mesSeleccionado, ahora, esMesActual, setClienteSeleccionado),
     [mesSeleccionado, ahora, esMesActual]
   );
 
@@ -672,7 +713,19 @@ export function RenovacionesPage() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 20 }}>
+      <CollapsibleCard
+        titulo="Renovaciones por periodicidad"
+        subtitulo={
+          <span style={{ textTransform: "capitalize" }}>
+            {mesFuturo.label}
+            {mesFuturoOffset === 0 && " (mes actual)"}
+          </span>
+        }
+        abierto={panelAbierto}
+        onToggle={() => setPanelAbierto((v) => !v)}
+        contador={resumenTotal.faltanRenovarCount}
+        tone={resumenTotal.faltanRenovarCount > 0 ? "warning" : "success"}
+      >
         <div
           style={{
             display: "flex",
@@ -682,18 +735,12 @@ export function RenovacionesPage() {
             gap: 16,
           }}
         >
-          <div>
-            <h2 style={{ margin: 0 }}>
-              Renovaciones por periodicidad — <span style={{ textTransform: "capitalize" }}>{mesFuturo.label}</span>
-              {mesFuturoOffset === 0 && " (mes actual)"}
-            </h2>
-            <p className="muted" style={{ margin: "4px 0 0" }}>
-              Quiénes ya renovaron este ciclo y quiénes todavía faltan, por tipo de plan —
-              incluye planes trimestrales, semestrales y anuales, no solo mensuales. Monto
-              cobrado según comprobantes reales, monto pendiente estimado según ingreso
-              mensual real.
-            </p>
-          </div>
+          <p className="muted" style={{ margin: 0, maxWidth: 560 }}>
+            Quiénes ya renovaron este ciclo y quiénes todavía faltan, por tipo de plan —
+            incluye planes trimestrales, semestrales y anuales, no solo mensuales. Monto
+            cobrado según comprobantes reales, monto pendiente estimado según ingreso
+            mensual real.
+          </p>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button
               type="button"
@@ -804,7 +851,7 @@ export function RenovacionesPage() {
             }
           />
         </div>
-      </div>
+      </CollapsibleCard>
 
       {vista === "cobranzaMensual" && (
         <>
@@ -820,6 +867,7 @@ export function RenovacionesPage() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              flexWrap: "wrap",
               gap: 16,
               padding: "12px 16px",
               marginBottom: 16,
@@ -832,7 +880,14 @@ export function RenovacionesPage() {
             >
               ← Mes anterior
             </button>
-            <strong style={{ fontSize: 16, textTransform: "capitalize", minWidth: 180, textAlign: "center" }}>
+            <strong
+              style={{
+                fontSize: 16,
+                textTransform: "capitalize",
+                minWidth: 180,
+                textAlign: "center",
+              }}
+            >
               {mesSeleccionado.label}
               {esMesActual && " (en curso)"}
             </strong>
@@ -890,7 +945,7 @@ export function RenovacionesPage() {
       )}
 
       <div className="clientes-toolbar" style={{ marginBottom: 12, marginTop: 20 }}>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             type="button"
             className={vista === "proximas" ? "btn btn-primary" : "btn btn-secondary"}
@@ -968,7 +1023,7 @@ export function RenovacionesPage() {
       <div className="card">
         {vista === "proximas" && (
           <DataTable
-            columns={columnasProximas}
+            columns={columnasProximas(setClienteSeleccionado)}
             rows={filasProximas}
             rowKey={(c) => c.numeroDocumentoCliente}
             loading={loading}
@@ -977,7 +1032,7 @@ export function RenovacionesPage() {
         )}
         {vista === "vencidas" && (
           <DataTable
-            columns={columnasVencidas}
+            columns={columnasVencidas(setClienteSeleccionado)}
             rows={filasVencidas}
             rowKey={(c) => c.numeroDocumentoCliente}
             loading={loading}
@@ -994,6 +1049,14 @@ export function RenovacionesPage() {
           />
         )}
       </div>
+
+      {clienteSeleccionado && (
+        <AccionesClienteDrawer
+          key={clienteSeleccionado}
+          numeroDocumentoCliente={clienteSeleccionado}
+          onClose={() => setClienteSeleccionado(null)}
+        />
+      )}
     </div>
   );
 }

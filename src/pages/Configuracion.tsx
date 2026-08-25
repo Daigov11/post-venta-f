@@ -97,6 +97,27 @@ const CONFIG_FIELDS: {
     type: "number",
   },
   {
+    key: "seguimiento.dias_etapa2",
+    label: "Seguimiento post venta — días para etapa 2",
+    description:
+      "Días desde la etapa 1 (bienvenida) para que corresponda la etapa 2 de seguimiento del onboarding.",
+    type: "number",
+  },
+  {
+    key: "seguimiento.dias_etapa3",
+    label: "Seguimiento post venta — días para etapa 3",
+    description:
+      "Días desde la etapa 2 para que corresponda la etapa 3 (última ronda) de seguimiento del onboarding.",
+    type: "number",
+  },
+  {
+    key: "seguimiento.fecha_corte_clientes_nuevos",
+    label: "Seguimiento post venta — fecha de corte",
+    description:
+      "Clientes con fecha de inicio a partir de esta fecha entran solos al flujo automático de seguimiento post venta. Los anteriores ya fueron seguidos a mano (importados del Excel de Ligia).",
+    type: "date",
+  },
+  {
     key: "dataset.estados_excluidos",
     label: "Estados excluidos del conteo",
     description:

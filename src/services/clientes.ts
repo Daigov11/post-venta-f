@@ -1,5 +1,7 @@
 import { apiClient } from "./client";
 import type {
+  ClienteBajaResumen,
+  ClientesBajaQueryResult,
   ClientesQueryResult,
   EstadoPostVenta,
   FichaClienteResponse,
@@ -24,6 +26,11 @@ export interface ClientesQueryParams {
   comprobantesMax?: number;
   segmento?: string;
   renovacionProxima?: boolean;
+  nEstadoApiWorkingRaw?: string;
+  nuevoGranularidad?: "dia" | "semana" | "mes" | "anio";
+  nuevoReferencia?: string;
+  suspendidoGranularidad?: "dia" | "semana" | "mes" | "anio";
+  suspendidoReferencia?: string;
   sortBy?: string;
   sortDir?: "asc" | "desc";
   page?: number;
@@ -49,6 +56,7 @@ export async function getFichaCliente(
 export interface ClienteMetadataPatch {
   segmentoManual?: string | null;
   estadoPostVentaManual?: EstadoPostVenta | null;
+  telefonoManual?: string | null;
   etiquetas?: string[];
   observacionGeneral?: string | null;
 }
@@ -83,3 +91,20 @@ export async function refreshSystemUsersOne(
   );
   return data;
 }
+
+// Clientes con nEstadoApiWorking = "CLIENTE DE BAJA" — excluidos del listado
+// normal de /clientes, paginados aparte. La fechaBaja se calcula/cachea en el
+// backend bajo demanda por pagina, puede tardar un poco la primera vez que se
+// pide cada pagina.
+export async function getClientesBaja(params: {
+  page?: number;
+  pageSize?: number;
+  orden?: "reciente" | "antiguo";
+  granularidad?: "dia" | "semana" | "mes" | "anio";
+  referencia?: string;
+}): Promise<ClientesBajaQueryResult> {
+  const { data } = await apiClient.get<ClientesBajaQueryResult>("/clientes-baja", { params });
+  return data;
+}
+
+export type { ClienteBajaResumen };
