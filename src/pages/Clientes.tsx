@@ -38,6 +38,8 @@ const SORT_FIELD_BY_COLUMN: Record<string, string> = {
   comprobantes: "cantidadComprobantesHistorico",
   deuda: "deudaTotal",
   renovacion: "diasParaRenovacion",
+  ingresosMensuales: "ingresosClienteMensual",
+  actividad: "diasSinActividad",
 };
 
 const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
@@ -87,6 +89,7 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
     key: "ingresosMensuales",
     label: "Ingresos mensuales",
     align: "right",
+    sortable: true,
     render: (c) =>
       c.ordenVigente.postVentaExtra?.ingresosClienteMensual == null
         ? "—"
@@ -201,6 +204,32 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
     },
   },
   {
+    key: "actividad",
+    label: "Última actividad",
+    sortable: true,
+    align: "right",
+    // fechaInactivo (Administrativo/post-venta, fecha_inactivo_formato) es la
+    // fecha/hora real de ultimo ingreso del cliente a su sistema.
+    render: (c) => {
+      const fecha = c.ordenVigente.postVentaExtra?.fechaInactivo;
+      if (c.diasSinActividad === null || !fecha) return <span className="muted">—</span>;
+      const badge =
+        c.diasSinActividad <= 7 ? (
+          <Badge tone="success">{c.diasSinActividad} día(s)</Badge>
+        ) : c.diasSinActividad <= 30 ? (
+          <Badge tone="neutral">{c.diasSinActividad} día(s)</Badge>
+        ) : (
+          <Badge tone="warning">{c.diasSinActividad} día(s)</Badge>
+        );
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          <span>{new Date(fecha).toLocaleString("es-PE")}</span>
+          {badge}
+        </div>
+      );
+    },
+  },
+  {
     key: "alertas",
     label: "Alertas",
     align: "center",
@@ -221,7 +250,15 @@ const COLUMN_OPTIONS: ColumnOption[] = ALL_COLUMNS.map((c) => ({ key: c.key, lab
 // disponible en "Agregar/quitar columnas", y cada usuario lo ajusta a su
 // gusto (persistido en localStorage) — esto es solo lo que ve alguien que
 // nunca lo toco.
-const DEFAULT_VISIBLE_COLUMNS = ["estado", "cliente", "plan", "deuda", "renovacion", "ejecutivo"];
+const DEFAULT_VISIBLE_COLUMNS = [
+  "estado",
+  "cliente",
+  "plan",
+  "deuda",
+  "ingresosMensuales",
+  "renovacion",
+  "ejecutivo",
+];
 
 interface FiltersState {
   search: string;
@@ -239,8 +276,11 @@ interface FiltersState {
   antiguedadMesesMax: string;
   comprobantesMin: string;
   comprobantesMax: string;
+  ingresosMensualesMin: string;
+  ingresosMensualesMax: string;
   segmento: string;
   renovacionProxima: string;
+  sinActividadReciente: string;
 }
 
 const DEFAULT_FILTERS: FiltersState = {
@@ -259,8 +299,11 @@ const DEFAULT_FILTERS: FiltersState = {
   antiguedadMesesMax: "",
   comprobantesMin: "",
   comprobantesMax: "",
+  ingresosMensualesMin: "",
+  ingresosMensualesMax: "",
   segmento: "",
   renovacionProxima: "",
+  sinActividadReciente: "",
 };
 
 function toQueryParams(
@@ -287,8 +330,13 @@ function toQueryParams(
     antiguedadMesesMax: filters.antiguedadMesesMax ? Number(filters.antiguedadMesesMax) : undefined,
     comprobantesMin: filters.comprobantesMin ? Number(filters.comprobantesMin) : undefined,
     comprobantesMax: filters.comprobantesMax ? Number(filters.comprobantesMax) : undefined,
+    ingresosMensualesMin: filters.ingresosMensualesMin ? Number(filters.ingresosMensualesMin) : undefined,
+    ingresosMensualesMax: filters.ingresosMensualesMax ? Number(filters.ingresosMensualesMax) : undefined,
     segmento: filters.segmento || undefined,
     renovacionProxima: filters.renovacionProxima ? filters.renovacionProxima === "true" : undefined,
+    sinActividadReciente: filters.sinActividadReciente
+      ? filters.sinActividadReciente === "true"
+      : undefined,
     sortBy: sortBy as ClientesQueryParams["sortBy"],
     sortDir,
     page,
@@ -503,6 +551,33 @@ export function ClientesPage() {
             <option value="false">Sin deuda</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="filtro-periodicidad">Periodicidad</label>
+          <select
+            id="filtro-periodicidad"
+            value={filters.periodicidad}
+            onChange={(e) => updateFilter("periodicidad", e.target.value)}
+          >
+            <option value="">Todas</option>
+            <option value="MENSUAL">Mensual</option>
+            <option value="TRIMESTRAL">Trimestral</option>
+            <option value="SEMESTRAL">Semestral</option>
+            <option value="ANUAL">Anual</option>
+            <option value="DESCONOCIDO">Desconocido</option>
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="filtro-actividad">Actividad</label>
+          <select
+            id="filtro-actividad"
+            value={filters.sinActividadReciente}
+            onChange={(e) => updateFilter("sinActividadReciente", e.target.value)}
+          >
+            <option value="">Todos</option>
+            <option value="true">Sin actividad reciente</option>
+            <option value="false">Activo recientemente</option>
+          </select>
+        </div>
         <button
           type="button"
           className="btn btn-ghost clientes-more-filters-toggle"
@@ -546,21 +621,6 @@ export function ClientesPage() {
               onChange={(e) => updateFilter("plan", e.target.value)}
               placeholder="Nombre exacto del plan"
             />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-periodicidad">Periodicidad</label>
-            <select
-              id="filtro-periodicidad"
-              value={filters.periodicidad}
-              onChange={(e) => updateFilter("periodicidad", e.target.value)}
-            >
-              <option value="">Todas</option>
-              <option value="MENSUAL">Mensual</option>
-              <option value="TRIMESTRAL">Trimestral</option>
-              <option value="SEMESTRAL">Semestral</option>
-              <option value="ANUAL">Anual</option>
-              <option value="DESCONOCIDO">Desconocido</option>
-            </select>
           </div>
           <div className="field">
             <label htmlFor="filtro-ejecutivo">Ejecutivo</label>
@@ -632,6 +692,26 @@ export function ClientesPage() {
               min={0}
               value={filters.comprobantesMax}
               onChange={(e) => updateFilter("comprobantesMax", e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="filtro-ingreso-min">Ingresos mensuales mín. (S/)</label>
+            <input
+              id="filtro-ingreso-min"
+              type="number"
+              min={0}
+              value={filters.ingresosMensualesMin}
+              onChange={(e) => updateFilter("ingresosMensualesMin", e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="filtro-ingreso-max">Ingresos mensuales máx. (S/)</label>
+            <input
+              id="filtro-ingreso-max"
+              type="number"
+              min={0}
+              value={filters.ingresosMensualesMax}
+              onChange={(e) => updateFilter("ingresosMensualesMax", e.target.value)}
             />
           </div>
           <button

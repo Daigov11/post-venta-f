@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { NotaForm } from "../components/forms/NotaForm";
 import { SeguimientoForm } from "../components/forms/SeguimientoForm";
 import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
@@ -133,6 +133,7 @@ function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }
 }
 
 export function ClienteFichaPage() {
+  const navigate = useNavigate();
   const { numeroDocumentoCliente = "" } = useParams();
   const { username } = useAuth();
   const { data, loading, error, refetch } = useCliente(numeroDocumentoCliente);
@@ -274,7 +275,14 @@ export function ClienteFichaPage() {
   }
 
   if (error || !data) {
-    return <p className="error-text">{error ?? "Cliente no encontrado"}</p>;
+    return (
+      <div>
+        <button type="button" className="btn btn-ghost ficha-volver" onClick={() => navigate(-1)}>
+          ← Volver
+        </button>
+        <p className="error-text">{error ?? "Cliente no encontrado"}</p>
+      </div>
+    );
   }
 
   const { cliente, notas, tareas, alertas, oportunidades, seguimientoPostVenta } = data;
@@ -315,6 +323,9 @@ export function ClienteFichaPage() {
 
   return (
     <div>
+      <button type="button" className="btn btn-ghost ficha-volver" onClick={() => navigate(-1)}>
+        ← Volver
+      </button>
       <div className="card ficha-header">
         <div>
           <h1>{cliente.nombreCliente}</h1>
@@ -1016,7 +1027,7 @@ export function ClienteFichaPage() {
       <div className="ficha-grid">
         <section className="card ficha-section">
           <h2>Datos aún no disponibles</h2>
-          <EmptyState message="Último login, renovaciones, módulos y encuestas quedarán disponibles cuando APIWorking entregue los endpoints correspondientes. Historial de estados, contacto efectivo (llamadas) e incidencias ya se ven en 'Incidencias' e 'Historial de seguimiento' más abajo." />
+          <EmptyState message="Módulos y encuestas quedarán disponibles cuando APIWorking entregue los endpoints correspondientes. Último ingreso al sistema se ve en la pestaña 'Actividad', próxima renovación en 'Resumen', e incidencias e historial de estados más abajo." />
         </section>
 
         <section className="card ficha-section ficha-full-width">

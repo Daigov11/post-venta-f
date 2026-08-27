@@ -1,3 +1,7 @@
+.ficha-volver {
+  margin-bottom: var(--space-3);
+}
+
 .ficha-header {
   padding: var(--space-5);
   display: flex;

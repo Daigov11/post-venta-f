@@ -24,8 +24,11 @@ export interface ClientesQueryParams {
   antiguedadMesesMax?: number;
   comprobantesMin?: number;
   comprobantesMax?: number;
+  ingresosMensualesMin?: number;
+  ingresosMensualesMax?: number;
   segmento?: string;
   renovacionProxima?: boolean;
+  sinActividadReciente?: boolean;
   nEstadoApiWorkingRaw?: string;
   nuevoGranularidad?: "dia" | "semana" | "mes" | "anio";
   nuevoReferencia?: string;

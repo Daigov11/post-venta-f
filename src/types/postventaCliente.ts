@@ -139,6 +139,7 @@ export interface PostVentaCliente {
   usuarios: string[];
   baseDatos: string | null;
   diasSinActividad: number | null;
+  sinActividadReciente: boolean;
 
   metadata: {
     notasCount: number;
