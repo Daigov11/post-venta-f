@@ -13,7 +13,10 @@ const EXTRA_SISTEMAS: { key: keyof Omit<ClienteSistemas, "apiWorking">; icono: s
   { key: "pos", icono: "🧾", label: "POS" },
 ];
 
-export function SistemasBadges({ sistemas }: { sistemas: ClienteSistemas }) {
+export function SistemasBadges({ sistemas }: { sistemas: ClienteSistemas | null | undefined }) {
+  // Defensivo: en produccion se vio un caso donde llegaba undefined (dato
+  // faltante en el origen para ese cliente) — antes tumbaba toda la fila/pagina.
+  if (!sistemas) return null;
   return (
     <div className="sistemas-badges">
       <span

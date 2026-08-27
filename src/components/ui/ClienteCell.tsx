@@ -13,7 +13,7 @@ export function ClienteCell({
 }: {
   numeroDocumentoCliente: string;
   nombreCliente: string;
-  sistemas: ClienteSistemas;
+  sistemas: ClienteSistemas | null | undefined;
 }) {
   return (
     <div className="cliente-cell">
