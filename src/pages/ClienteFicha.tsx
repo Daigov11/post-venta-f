@@ -287,6 +287,9 @@ export function ClienteFichaPage() {
 
   const { cliente, notas, tareas, alertas, oportunidades, seguimientoPostVenta } = data;
   const telefonoLimpio = cliente.telefonoEfectivo?.replace(/\D/g, "");
+  // Defensivo: mismo caso que sistemas (ver SistemasBadges) — en produccion
+  // se vio undefined para algun cliente pese al tipo no-nullable.
+  const usuarios = cliente.usuarios ?? [];
   const ultimoPago = cliente.ordenVigente.pagos
     .filter((p) => p.fechaEmitido !== null)
     .reduce<(typeof cliente.ordenVigente.pagos)[number] | null>(
@@ -764,9 +767,9 @@ export function ClienteFichaPage() {
             )}
           </div>
 
-          {cliente.usuarios.length > 0 && (
+          {usuarios.length > 0 && (
             <div className="usuarios-list">
-              {cliente.usuarios.map((usuario) => (
+              {usuarios.map((usuario) => (
                 <div key={usuario} className="usuarios-list-item">
                   <code>{usuario}</code>
                   <button
@@ -790,11 +793,11 @@ export function ClienteFichaPage() {
             >
               {refreshingTrabajadores ? "Actualizando..." : "Actualizar"}
             </button>
-            {cliente.usuarios.length > 0 && (
+            {usuarios.length > 0 && (
               <button
                 type="button"
                 className="btn btn-secondary"
-                onClick={() => handleCopiar(cliente.usuarios.join("\n"), "__todos__")}
+                onClick={() => handleCopiar(usuarios.join("\n"), "__todos__")}
               >
                 {usuarioCopiado === "__todos__" ? "Copiado ✓" : "Copiar todos"}
               </button>
