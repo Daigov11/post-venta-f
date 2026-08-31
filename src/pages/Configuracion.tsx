@@ -35,6 +35,13 @@ const CONFIG_FIELDS: {
     type: "number",
   },
   {
+    key: "alerta.deuda_dias_max",
+    label: "Días de atraso máximo para alerta de deuda",
+    description:
+      "Días de atraso (vencido desde) a partir de los cuales la alerta de deuda pendiente deja de mostrarse — evita que clientes suspendidos hace mucho sigan apareciendo indefinidamente.",
+    type: "number",
+  },
+  {
     key: "alerta.antiguedad_aniversario_meses",
     label: "Ciclo de aniversario (meses)",
     description: "Cada cuántos meses de antigüedad se genera una alerta de aniversario.",

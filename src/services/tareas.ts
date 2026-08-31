@@ -1,5 +1,11 @@
 import { apiClient } from "./client";
-import type { EstadoTarea, PrioridadTarea, Seguimiento, Tarea } from "../types/postventaCliente";
+import type {
+  EstadoTarea,
+  PrioridadTarea,
+  Seguimiento,
+  Tarea,
+  TareaRenovacion,
+} from "../types/postventaCliente";
 
 export interface TareasQueryParams {
   numeroDocumentoCliente?: string;
@@ -10,6 +16,14 @@ export interface TareasQueryParams {
 
 export async function getTareas(params: TareasQueryParams = {}): Promise<Tarea[]> {
   const { data } = await apiClient.get<{ data: Tarea[] }>("/tareas", { params });
+  return data.data;
+}
+
+// Auto-generadas por el sync compartido (clientes en ventana de renovacion,
+// una tarea abierta a la vez por cliente) — se sincronizan al pedir esta
+// lista, no hace falta refrescar manualmente.
+export async function getTareasRenovacion(): Promise<TareaRenovacion[]> {
+  const { data } = await apiClient.get<{ data: TareaRenovacion[] }>("/tareas/renovacion");
   return data.data;
 }
 

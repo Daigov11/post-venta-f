@@ -7,6 +7,7 @@ import { ClienteCell } from "../ui/ClienteCell";
 import { CollapsibleCard } from "../ui/CollapsibleCard";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { Pagination } from "../ui/Pagination";
+import { SearchInput } from "../ui/SearchInput";
 import { getClientes, getClientesBaja } from "../../services/clientes";
 import { getSeguimientoPostVenta } from "../../services/seguimientoPostVenta";
 import type {
@@ -214,6 +215,7 @@ function ModuloNuevos({
   const [granularidad, setGranularidad] = useState<Granularidad>("semana");
   const [offset, setOffset] = useState(0);
   const [orden, setOrden] = useState<Orden>("recientes");
+  const [search, setSearch] = useState("");
   const [data, setData] = useState<ClientesQueryResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -223,13 +225,14 @@ function ModuloNuevos({
     getClientes({
       nuevoGranularidad: granularidad,
       nuevoReferencia: referenciaISO(granularidad, offset),
+      search: search || undefined,
       pageSize: 500,
       sortBy: "fechaInicioCliente",
       sortDir: orden === "recientes" ? "desc" : "asc",
     })
       .then(setData)
       .finally(() => setLoading(false));
-  }, [abierto, granularidad, offset, orden]);
+  }, [abierto, granularidad, offset, orden, search]);
 
   return (
     <CollapsibleCard
@@ -239,6 +242,7 @@ function ModuloNuevos({
       contador={data?.total}
       tone="success"
     >
+      <SearchInput value={search} onChange={setSearch} placeholder="Buscar por nombre o RUC..." />
       <PeriodoNavigator
         granularidad={granularidad}
         onGranularidadChange={setGranularidad}
@@ -310,6 +314,7 @@ function ModuloSuspendidos({
   const [porPeriodo, setPorPeriodo] = useState(false);
   const [granularidad, setGranularidad] = useState<Granularidad>("semana");
   const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState("");
   const [data, setData] = useState<ClientesQueryResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -320,13 +325,14 @@ function ModuloSuspendidos({
       nEstadoApiWorkingRaw: "SUSPENDIDO POR PAGO",
       suspendidoGranularidad: porPeriodo ? granularidad : undefined,
       suspendidoReferencia: porPeriodo ? referenciaISO(granularidad, offset) : undefined,
+      search: search || undefined,
       pageSize: 500,
       sortBy: "vencidoDesde",
       sortDir: orden === "recientes" ? "desc" : "asc",
     })
       .then(setData)
       .finally(() => setLoading(false));
-  }, [abierto, orden, porPeriodo, granularidad, offset]);
+  }, [abierto, orden, porPeriodo, granularidad, offset, search]);
 
   return (
     <CollapsibleCard
@@ -336,6 +342,7 @@ function ModuloSuspendidos({
       contador={data?.total}
       tone="critical"
     >
+      <SearchInput value={search} onChange={setSearch} placeholder="Buscar por nombre o RUC..." />
       <div className="modulo-clientes-periodo">
         <button
           type="button"
@@ -431,6 +438,7 @@ function ModuloBaja({
   const [porPeriodo, setPorPeriodo] = useState(false);
   const [granularidad, setGranularidad] = useState<Granularidad>("semana");
   const [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState("");
   const [data, setData] = useState<{
     data: ClienteBajaResumen[];
     page: number;
@@ -452,10 +460,11 @@ function ModuloBaja({
       orden: orden === "recientes" ? "reciente" : "antiguo",
       granularidad: porPeriodo ? granularidad : undefined,
       referencia: porPeriodo ? referenciaISO(granularidad, offset) : undefined,
+      search: search || undefined,
     })
       .then(setData)
       .finally(() => setLoading(false));
-  }, [abierto, page, orden, porPeriodo, granularidad, offset]);
+  }, [abierto, page, orden, porPeriodo, granularidad, offset, search]);
 
   return (
     <CollapsibleCard
@@ -470,6 +479,14 @@ function ModuloBaja({
         puede tardar unos segundos; después queda guardada. "Seguimiento anterior" es referencia
         importada del Excel de bajas, cuando existe para ese cliente.
       </p>
+      <SearchInput
+        value={search}
+        onChange={(v) => {
+          setSearch(v);
+          setPage(1);
+        }}
+        placeholder="Buscar por nombre o RUC..."
+      />
       <div className="modulo-clientes-periodo">
         <button
           type="button"
@@ -649,6 +666,7 @@ function ModuloSeguimientoPostVenta({
   const [porSemana, setPorSemana] = useState(false);
   const [semanaOffset, setSemanaOffset] = useState(0);
   const [orden, setOrden] = useState<Orden>("recientes");
+  const [search, setSearch] = useState("");
   const [data, setData] = useState<{ data: SeguimientoResumen[]; total: number } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -671,6 +689,13 @@ function ModuloSeguimientoPostVenta({
         const fechaInicio = new Date(r.fechaInicio);
         if (fechaInicio < semana.inicio || fechaInicio > semana.fin) return false;
       }
+      if (search) {
+        const needle = search.trim().toLowerCase();
+        const matches =
+          r.nombreCliente.toLowerCase().includes(needle) ||
+          r.numeroDocumentoCliente.toLowerCase().includes(needle);
+        if (!matches) return false;
+      }
       return true;
     })
     .sort((a, b) => {
@@ -690,6 +715,7 @@ function ModuloSeguimientoPostVenta({
         Onboarding de clientes recién capacitados — 3 rondas de contacto (bienvenida, +15 días,
         +30 días). Incluye a los ya seguidos a mano en el Excel de Ligia (importados).
       </p>
+      <SearchInput value={search} onChange={setSearch} placeholder="Buscar por nombre o RUC..." />
       <div className="modulo-clientes-periodo">
         <select value={filtroEtapa} onChange={(e) => setFiltroEtapa(e.target.value as "" | "1" | "2" | "3")}>
           <option value="">Todas las etapas</option>

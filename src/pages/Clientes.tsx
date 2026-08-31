@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
 import { Badge } from "../components/ui/Badge";
 import { ColumnCustomizer, type ColumnOption } from "../components/ui/ColumnCustomizer";
@@ -69,6 +68,34 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
         <SistemasBadges sistemas={c.sistemas} />
       </div>
     ),
+  },
+  {
+    key: "telefono",
+    label: "Teléfono",
+    render: (c) => {
+      if (!c.telefonoEfectivo) return <span className="muted">—</span>;
+      const limpio = c.telefonoEfectivo.replace(/\D/g, "");
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span>{c.telefonoEfectivo}</span>
+          {limpio && (
+            <div style={{ display: "flex", gap: 6 }}>
+              <a className="btn btn-secondary" href={`tel:${limpio}`}>
+                Llamar
+              </a>
+              <a
+                className="btn btn-secondary"
+                href={`https://wa.me/51${limpio}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                WhatsApp
+              </a>
+            </div>
+          )}
+        </div>
+      );
+    },
   },
   {
     key: "os",
@@ -253,6 +280,7 @@ const COLUMN_OPTIONS: ColumnOption[] = ALL_COLUMNS.map((c) => ({ key: c.key, lab
 const DEFAULT_VISIBLE_COLUMNS = [
   "estado",
   "cliente",
+  "telefono",
   "plan",
   "deuda",
   "ingresosMensuales",
@@ -345,7 +373,6 @@ function toQueryParams(
 }
 
 export function ClientesPage() {
-  const navigate = useNavigate();
   const [filters, setFilters] = useState<FiltersState>(DEFAULT_FILTERS);
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [sortBy, setSortBy] = useState<string | undefined>(undefined);
@@ -737,7 +764,6 @@ export function ClientesPage() {
           sortBy={Object.entries(SORT_FIELD_BY_COLUMN).find(([, v]) => v === sortBy)?.[0]}
           sortDir={sortDir}
           onSortChange={handleSortChange}
-          onRowClick={(c) => navigate(`/clientes/${c.numeroDocumentoCliente}`)}
           loading={loading}
         />
       </div>

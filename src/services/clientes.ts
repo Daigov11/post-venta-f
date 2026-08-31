@@ -81,7 +81,9 @@ export interface RefreshSystemUsersAllResult {
 // tardar varios minutos, es una accion administrativa manual.
 export async function refreshSystemUsersAll(): Promise<RefreshSystemUsersAllResult> {
   const { data } = await apiClient.post<RefreshSystemUsersAllResult>(
-    "/clientes/system-users/refresh"
+    "/clientes/system-users/refresh",
+    undefined,
+    { timeout: 0 }
   );
   return data;
 }
@@ -105,6 +107,7 @@ export async function getClientesBaja(params: {
   orden?: "reciente" | "antiguo";
   granularidad?: "dia" | "semana" | "mes" | "anio";
   referencia?: string;
+  search?: string;
 }): Promise<ClientesBajaQueryResult> {
   const { data } = await apiClient.get<ClientesBajaQueryResult>("/clientes-baja", { params });
   return data;

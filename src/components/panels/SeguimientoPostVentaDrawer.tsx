@@ -3,6 +3,7 @@ import { Badge, type BadgeTone } from "../ui/Badge";
 import { Drawer } from "../ui/Drawer";
 import { Skeleton } from "../ui/Skeleton";
 import { NotaForm } from "../forms/NotaForm";
+import { extractErrorMessage } from "../../hooks/useAsyncData";
 import { createNota } from "../../services/notas";
 import {
   getSeguimientoDetalle,
@@ -45,6 +46,7 @@ export function SeguimientoPostVentaDrawer({
 }) {
   const [detalle, setDetalle] = useState<SeguimientoDetalle | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingNota, setSavingNota] = useState(false);
   const [notaAbierta, setNotaAbierta] = useState(false);
@@ -57,8 +59,10 @@ export function SeguimientoPostVentaDrawer({
 
   function cargar() {
     setLoading(true);
+    setError(null);
     getSeguimientoDetalle(numeroDocumentoCliente)
       .then(setDetalle)
+      .catch((err) => setError(extractErrorMessage(err, "No se pudo cargar el seguimiento.")))
       .finally(() => setLoading(false));
   }
 
@@ -108,6 +112,14 @@ export function SeguimientoPostVentaDrawer({
   return (
     <Drawer open onClose={onClose} title="Seguimiento Post Venta">
       {loading && !detalle && <Skeleton height={280} />}
+      {error && !loading && (
+        <div className="stack-form">
+          <p className="error-text">{error}</p>
+          <button type="button" className="btn btn-secondary" onClick={cargar}>
+            Reintentar
+          </button>
+        </div>
+      )}
       {detalle && (
         <div className="stack-form">
           <section>

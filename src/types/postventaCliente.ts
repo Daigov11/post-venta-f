@@ -258,6 +258,7 @@ export interface PostVentaConfigValues {
   "estado.deuda_atencion_min": number;
   "estado.documentacion_completa_min": number;
   "alerta.deuda_min": number;
+  "alerta.deuda_dias_max": number;
   "alerta.antiguedad_aniversario_meses": number;
   "oportunidad.cliente_antiguo_meses_min": number;
   "oportunidad.alto_volumen_comprobantes_min": number;
@@ -323,11 +324,13 @@ export type EstadoTarea =
   | "ESPERANDO_CLIENTE"
   | "COMPLETADA"
   | "CANCELADA";
+export type TipoTarea = "MANUAL" | "RENOVACION";
 
 export interface Tarea {
   id: number;
   numeroDocumentoCliente: string;
   idOrdenServicio: number | null;
+  tipo: TipoTarea;
   titulo: string;
   descripcion: string | null;
   responsable: string;
@@ -337,6 +340,21 @@ export interface Tarea {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Tarea tipo RENOVACION + snapshot en vivo del cliente (periodicidad,
+// proxima renovacion, ingreso mensual) para filtrar/ordenar sin otro fetch.
+export interface TareaRenovacion {
+  tarea: Tarea;
+  cliente: {
+    numeroDocumentoCliente: string;
+    nombreCliente: string;
+    sistemas: ClienteSistemas;
+    periodicidad: Periodicidad;
+    proximaRenovacion: string | null;
+    diasParaRenovacion: number | null;
+    ingresoMensualReal: number | null;
+  };
 }
 
 export interface Seguimiento {

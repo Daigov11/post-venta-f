@@ -11,6 +11,6 @@ export async function refreshPostVentaCache(): Promise<{
   totalClientes: number;
   totalOsRows: number;
 }> {
-  const { data } = await apiClient.post("/postventa/refresh");
+  const { data } = await apiClient.post("/postventa/refresh", undefined, { timeout: 0 });
   return data;
 }
