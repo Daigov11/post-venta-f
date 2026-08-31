@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
 import { Badge } from "../components/ui/Badge";
 import { ColumnCustomizer, type ColumnOption } from "../components/ui/ColumnCustomizer";
@@ -63,7 +64,9 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
     sortable: true,
     render: (c) => (
       <div className="cliente-cell">
-        <span className="cliente-cell-nombre">{c.nombreCliente}</span>
+        <Link className="cliente-cell-nombre" to={`/clientes/${c.numeroDocumentoCliente}`}>
+          {c.nombreCliente}
+        </Link>
         <span className="cliente-cell-ruc">{c.numeroDocumentoCliente}</span>
         <SistemasBadges sistemas={c.sistemas} />
       </div>
