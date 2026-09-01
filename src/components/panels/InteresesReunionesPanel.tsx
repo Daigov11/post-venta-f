@@ -1,16 +1,24 @@
 import axios from "axios";
 import { useEffect, useState, type FormEvent } from "react";
 import { Badge } from "../ui/Badge";
+import { CalendarioFecha } from "../ui/CalendarioFecha";
 import { EmptyState } from "../ui/EmptyState";
 import { updateClienteMetadata } from "../../services/clientes";
+import { getIncidencias } from "../../services/incidencias";
+import {
+  createIncidenciaManual,
+  getIncidenciasManuales,
+} from "../../services/incidenciasManuales";
 import { createInteres, setClienteIntereses } from "../../services/intereses";
-import { getHistorialSeguimiento } from "../../services/historial";
+import { createNota, getNotas } from "../../services/notas";
 import { createReunion, getDisponibilidad, updateReunionEstado } from "../../services/reuniones";
 import type {
   EstadoReunion,
-  HistorialSeguimientoEvento,
+  Incidencia,
+  IncidenciaManual,
   InteresCatalogo,
   ModalidadReunion,
+  Nota,
   Reunion,
 } from "../../types/postventaCliente";
 
@@ -18,7 +26,10 @@ const ESTADO_REUNION_LABEL: Record<EstadoReunion, string> = {
   PROGRAMADA: "Programada",
   COMPLETADA: "Completada",
   CANCELADA: "Cancelada",
+  EN_ESPERA: "En espera de horario",
 };
+
+const TIPOS_REUNION_ESPECIAL = ["CAPACITACION", "REFORZAMIENTO"];
 
 function esDomingo(fecha: string): boolean {
   if (!fecha) return false;
@@ -27,105 +38,6 @@ function esDomingo(fecha: string): boolean {
 
 function hoyIso(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-const DIAS_SEMANA = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"];
-const MESES = [
-  "enero",
-  "febrero",
-  "marzo",
-  "abril",
-  "mayo",
-  "junio",
-  "julio",
-  "agosto",
-  "septiembre",
-  "octubre",
-  "noviembre",
-  "diciembre",
-];
-
-// Calendario visual para elegir la fecha de la reunion — reemplaza el
-// <input type="date"> nativo por el mismo patron ya usado en otros productos
-// (pagos.apiworking.com.pe): grilla de mes con navegacion, domingos y fechas
-// pasadas deshabilitados directamente en la celda (no hace falta el aviso de
-// texto aparte que tenia el input nativo).
-function CalendarioFecha({
-  fecha,
-  onSelect,
-}: {
-  fecha: string;
-  onSelect: (iso: string) => void;
-}) {
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const inicial = fecha ? new Date(`${fecha}T00:00:00`) : hoy;
-  const [mesVista, setMesVista] = useState(
-    () => new Date(inicial.getFullYear(), inicial.getMonth(), 1)
-  );
-
-  const anio = mesVista.getFullYear();
-  const mes = mesVista.getMonth();
-  const offset = (new Date(anio, mes, 1).getDay() + 6) % 7; // 0 = lunes
-  const totalDias = new Date(anio, mes + 1, 0).getDate();
-  const enMesActual = anio === hoy.getFullYear() && mes === hoy.getMonth();
-
-  const celdas: (number | null)[] = [
-    ...Array.from({ length: offset }, () => null),
-    ...Array.from({ length: totalDias }, (_, i) => i + 1),
-  ];
-
-  return (
-    <div className="calendario-fecha">
-      <div className="calendario-fecha-header">
-        <button
-          type="button"
-          className="calendario-fecha-nav"
-          onClick={() => setMesVista((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-          disabled={enMesActual}
-          aria-label="Mes anterior"
-        >
-          ‹
-        </button>
-        <strong style={{ textTransform: "capitalize" }}>
-          {MESES[mes]} {anio}
-        </strong>
-        <button
-          type="button"
-          className="calendario-fecha-nav"
-          onClick={() => setMesVista((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-          aria-label="Mes siguiente"
-        >
-          ›
-        </button>
-      </div>
-      <div className="calendario-fecha-dow">
-        {DIAS_SEMANA.map((d) => (
-          <span key={d}>{d}</span>
-        ))}
-      </div>
-      <div className="calendario-fecha-grid">
-        {celdas.map((dia, i) => {
-          if (dia === null) return <span key={`vacio-${i}`} />;
-          const iso = `${anio}-${String(mes + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
-          const fechaCelda = new Date(anio, mes, dia);
-          const deshabilitado = fechaCelda < hoy || fechaCelda.getDay() === 0;
-          return (
-            <button
-              key={iso}
-              type="button"
-              className={`calendario-fecha-dia${iso === fecha ? " seleccionado" : ""}`}
-              disabled={deshabilitado}
-              onClick={() => onSelect(iso)}
-            >
-              {dia}
-            </button>
-          );
-        })}
-      </div>
-      <p className="muted calendario-fecha-nota">Los domingos no hay atención.</p>
-    </div>
-  );
 }
 
 export function InteresesReunionesPanel({
@@ -171,7 +83,7 @@ export function InteresesReunionesPanel({
     }
   }
 
-  const [incidencias, setIncidencias] = useState<HistorialSeguimientoEvento[] | null>(null);
+  const [incidencias, setIncidencias] = useState<Incidencia[] | null>(null);
   const [loadingIncidencias, setLoadingIncidencias] = useState(false);
   const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
 
@@ -179,14 +91,86 @@ export function InteresesReunionesPanel({
     setLoadingIncidencias(true);
     setErrorIncidencias(null);
     try {
-      const res = await getHistorialSeguimiento(idOrdenServicio);
-      setIncidencias(
-        res.data.filter((ev) => ev.estado.trim().toUpperCase().includes("INCIDENCIA"))
-      );
+      const res = await getIncidencias(numeroDocumentoCliente);
+      setIncidencias(res.data);
     } catch {
       setErrorIncidencias("No se pudieron cargar las incidencias.");
     } finally {
       setLoadingIncidencias(false);
+    }
+  }
+
+  // Nota de llamada — nota libre para dejar despues de comunicarse con el
+  // cliente (llamada, WhatsApp, etc.). Reusa el mismo sistema de Notas que ya
+  // existe (visible tambien en la pestaña "Notas" de la ficha), solo que
+  // aca se puede cargar sin salir de este panel, justo despues de llamar.
+  const [notas, setNotas] = useState<Nota[]>([]);
+  const [loadingNotas, setLoadingNotas] = useState(false);
+  const [nuevaNota, setNuevaNota] = useState("");
+  const [savingNota, setSavingNota] = useState(false);
+
+  useEffect(() => {
+    setLoadingNotas(true);
+    getNotas(numeroDocumentoCliente)
+      .then(setNotas)
+      .finally(() => setLoadingNotas(false));
+  }, [numeroDocumentoCliente]);
+
+  async function handleGuardarNota(event: FormEvent) {
+    event.preventDefault();
+    if (!nuevaNota.trim()) return;
+    setSavingNota(true);
+    try {
+      const creada = await createNota({
+        numeroDocumentoCliente,
+        idOrdenServicio,
+        nota: nuevaNota.trim(),
+      });
+      setNotas((prev) => [creada, ...prev]);
+      setNuevaNota("");
+    } finally {
+      setSavingNota(false);
+    }
+  }
+
+  // Incidencias registradas a mano desde la app — separadas de las de arriba
+  // (esas vienen de APIWorking) porque todavia no se conecta el endpoint de
+  // creacion real (existe, se conecta mas adelante). Se cargan solas al
+  // abrir el panel, es una consulta local rapida, no una llamada externa.
+  const [incidenciasManuales, setIncidenciasManuales] = useState<IncidenciaManual[]>([]);
+  const [loadingIncidenciasManuales, setLoadingIncidenciasManuales] = useState(false);
+  const [nuevaIncidenciaAbierta, setNuevaIncidenciaAbierta] = useState(false);
+  const [nuevaIncidenciaCaso, setNuevaIncidenciaCaso] = useState("");
+  const [nuevaIncidenciaTipo, setNuevaIncidenciaTipo] = useState("");
+  const [nuevaIncidenciaDescripcion, setNuevaIncidenciaDescripcion] = useState("");
+  const [savingIncidenciaManual, setSavingIncidenciaManual] = useState(false);
+
+  useEffect(() => {
+    setLoadingIncidenciasManuales(true);
+    getIncidenciasManuales(numeroDocumentoCliente)
+      .then(setIncidenciasManuales)
+      .finally(() => setLoadingIncidenciasManuales(false));
+  }, [numeroDocumentoCliente]);
+
+  async function handleRegistrarIncidencia(event: FormEvent) {
+    event.preventDefault();
+    if (!nuevaIncidenciaCaso.trim()) return;
+    setSavingIncidenciaManual(true);
+    try {
+      const creada = await createIncidenciaManual({
+        numeroDocumentoCliente,
+        idOrdenServicio,
+        caso: nuevaIncidenciaCaso.trim(),
+        tipo: nuevaIncidenciaTipo || null,
+        descripcion: nuevaIncidenciaDescripcion.trim() || null,
+      });
+      setIncidenciasManuales((prev) => [creada, ...prev]);
+      setNuevaIncidenciaCaso("");
+      setNuevaIncidenciaTipo("");
+      setNuevaIncidenciaDescripcion("");
+      setNuevaIncidenciaAbierta(false);
+    } finally {
+      setSavingIncidenciaManual(false);
     }
   }
 
@@ -209,6 +193,14 @@ export function InteresesReunionesPanel({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [schedulingError, setSchedulingError] = useState<string | null>(null);
   const [scheduling, setScheduling] = useState(false);
+
+  // Reunion especial: no pide horario ahora (el cliente todavia no confirmo
+  // cuando puede) — se registra el motivo y un comentario de disponibilidad,
+  // y queda "En espera de horario" hasta que alguien se lo asigne despues
+  // desde Reuniones (esa asignacion si valida contra el horario de atencion).
+  const [reunionEspecial, setReunionEspecial] = useState(false);
+  const [tipoReunionEspecial, setTipoReunionEspecial] = useState<string>("CAPACITACION");
+  const [tipoReunionOtro, setTipoReunionOtro] = useState("");
 
   useEffect(() => {
     setSeleccionados(new Set(marcados));
@@ -282,6 +274,40 @@ export function InteresesReunionesPanel({
       setSchedulingError("Indicá el asesor.");
       return;
     }
+
+    if (reunionEspecial) {
+      const tipo = tipoReunionEspecial === "OTRO" ? tipoReunionOtro.trim() : tipoReunionEspecial;
+      if (!tipo) {
+        setSchedulingError("Indicá el motivo de la reunión especial.");
+        return;
+      }
+      setScheduling(true);
+      try {
+        await createReunion({
+          numeroDocumentoCliente,
+          idOrdenServicio,
+          ejecutivo: ejecutivo.trim(),
+          modalidad,
+          tipoReunion: tipo,
+          lugarOLink: lugarOLink.trim() || null,
+          nota: nota.trim() || null,
+        });
+        setLugarOLink("");
+        setNota("");
+        setReunionEspecial(false);
+        onChanged();
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.data?.message) {
+          setSchedulingError(String(error.response.data.message));
+        } else {
+          setSchedulingError("No se pudo registrar la reunión especial.");
+        }
+      } finally {
+        setScheduling(false);
+      }
+      return;
+    }
+
     if (esDomingo(fecha)) {
       setSchedulingError("No hay atención los domingos.");
       return;
@@ -373,12 +399,46 @@ export function InteresesReunionesPanel({
       )}
 
       <section>
+        <h3 style={{ marginBottom: 4 }}>Nota de llamada{notas.length > 0 ? ` (${notas.length})` : ""}</h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Para dejar constancia de qué se habló después de llamar o escribirle al cliente.
+        </p>
+        {loadingNotas && <p className="muted">Cargando...</p>}
+        {!loadingNotas && notas.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            {notas.map((n) => (
+              <div key={n.id} style={{ fontSize: 13 }}>
+                <strong>{new Date(n.createdAt).toLocaleString("es-PE")}</strong>
+                {" — "}
+                {n.usuario}: {n.nota}
+              </div>
+            ))}
+          </div>
+        )}
+        <form onSubmit={handleGuardarNota} className="stack-form">
+          <div className="field">
+            <textarea
+              rows={2}
+              value={nuevaNota}
+              onChange={(e) => setNuevaNota(e.target.value)}
+              placeholder="Ej: contactado por WhatsApp, indicó que revisará el pago mañana."
+            />
+          </div>
+          <div className="form-actions">
+            <button type="submit" className="btn btn-secondary" disabled={savingNota}>
+              {savingNota ? "Guardando..." : "Guardar nota"}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section>
         <h3 style={{ marginBottom: 4 }}>
           Incidencias{incidencias ? ` (${incidencias.length})` : ""}
         </h3>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-          Para tener contexto antes de llamar o escribirle — viene del historial real de
-          APIWorking.
+          Para tener contexto antes de llamar o escribirle — viene directo de APIWorking, con
+          estado real de resolución.
         </p>
         {incidencias === null && (
           <button
@@ -396,14 +456,108 @@ export function InteresesReunionesPanel({
         )}
         {incidencias !== null && incidencias.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {incidencias.map((ev, i) => (
-              <div key={`inc-${ev.fecha ?? "sf"}-${i}`} style={{ fontSize: 13 }}>
-                <strong>{ev.fecha ? new Date(ev.fecha).toLocaleDateString("es-PE") : "Sin fecha"}</strong>
+            {incidencias.map((inc) => (
+              <div key={inc.idIncidencia} style={{ fontSize: 13 }}>
+                <Badge tone={inc.resuelta ? "success" : "warning"}>
+                  {inc.resuelta ? "Resuelta" : "Abierta"}
+                </Badge>{" "}
+                <strong>{inc.fecha ? new Date(inc.fecha).toLocaleDateString("es-PE") : "Sin fecha"}</strong>
                 {" — "}
-                {ev.observacion || ev.estado}
+                {inc.caso || inc.tipo}
               </div>
             ))}
           </div>
+        )}
+      </section>
+
+      <section>
+        <h3 style={{ marginBottom: 4 }}>
+          Incidencias registradas acá{incidenciasManuales.length > 0 ? ` (${incidenciasManuales.length})` : ""}
+        </h3>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+          Todavía no se conectó la creación directa en APIWorking — esto queda guardado en la app
+          mientras tanto.
+        </p>
+        {loadingIncidenciasManuales && <p className="muted">Cargando...</p>}
+        {!loadingIncidenciasManuales && incidenciasManuales.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            {incidenciasManuales.map((inc) => (
+              <div key={inc.id} style={{ fontSize: 13 }}>
+                <strong>{new Date(inc.createdAt).toLocaleDateString("es-PE")}</strong>
+                {" — "}
+                {inc.caso}
+                {inc.tipo && ` (${inc.tipo})`}
+                {inc.descripcion && (
+                  <div className="muted" style={{ marginTop: 2 }}>
+                    {inc.descripcion}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {!nuevaIncidenciaAbierta && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setNuevaIncidenciaAbierta(true)}
+          >
+            Registrar incidencia
+          </button>
+        )}
+        {nuevaIncidenciaAbierta && (
+          <form onSubmit={handleRegistrarIncidencia} className="stack-form">
+            <div className="field">
+              <label htmlFor="incidencia-caso">Caso</label>
+              <input
+                id="incidencia-caso"
+                type="text"
+                value={nuevaIncidenciaCaso}
+                onChange={(e) => setNuevaIncidenciaCaso(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="incidencia-tipo">Tipo</label>
+              <select
+                id="incidencia-tipo"
+                value={nuevaIncidenciaTipo}
+                onChange={(e) => setNuevaIncidenciaTipo(e.target.value)}
+              >
+                <option value="">Sin especificar</option>
+                <option value="USUARIO NO MANDA DOCUMENTOS">Usuario no manda documentos</option>
+                <option value="DOCUMENTOS RECHAZADOS">Documentos rechazados</option>
+                <option value="COMPROBANTES SIN ENVIAR">Comprobantes sin enviar</option>
+                <option value="ERROR AL ENVIAR COMPROBANTES A SUNAT">
+                  Error al enviar comprobantes a SUNAT
+                </option>
+                <option value="SOPORTE TECNICO">Soporte técnico</option>
+                <option value="OTRO">Otro</option>
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="incidencia-descripcion">Descripción</label>
+              <textarea
+                id="incidencia-descripcion"
+                rows={3}
+                value={nuevaIncidenciaDescripcion}
+                onChange={(e) => setNuevaIncidenciaDescripcion(e.target.value)}
+              />
+            </div>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setNuevaIncidenciaAbierta(false)}
+              >
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={savingIncidenciaManual}>
+                {savingIncidenciaManual ? "Guardando..." : "Guardar incidencia"}
+              </button>
+            </div>
+          </form>
         )}
       </section>
 
@@ -500,9 +654,14 @@ export function InteresesReunionesPanel({
             {reuniones.map((r) => (
               <div key={r.id} className="ficha-field-row">
                 <span className="ficha-field-label">
-                  {r.fecha} {r.horaInicio}–{r.horaFin} · {r.modalidad === "VIRTUAL" ? "Virtual" : "Presencial"}
+                  {r.estado === "EN_ESPERA"
+                    ? "Sin horario asignado todavía"
+                    : `${r.fecha} ${r.horaInicio}–${r.horaFin}`}
+                  {" · "}
+                  {r.modalidad === "VIRTUAL" ? "Virtual" : "Presencial"}
                   {" · "}
                   {r.ejecutivo}
+                  {r.tipoReunion && ` · ${r.tipoReunion}`}
                 </span>
                 <span className="ficha-field-value">
                   <Badge
@@ -511,7 +670,9 @@ export function InteresesReunionesPanel({
                         ? "info"
                         : r.estado === "COMPLETADA"
                           ? "success"
-                          : "neutral"
+                          : r.estado === "EN_ESPERA"
+                            ? "warning"
+                            : "neutral"
                     }
                   >
                     {ESTADO_REUNION_LABEL[r.estado]}
@@ -540,6 +701,23 @@ export function InteresesReunionesPanel({
             ))}
           </div>
         )}
+
+        <div className="modulo-clientes-periodo" style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className={reunionEspecial ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setReunionEspecial(false)}
+          >
+            Agendar reunión
+          </button>
+          <button
+            type="button"
+            className={reunionEspecial ? "btn btn-primary" : "btn btn-secondary"}
+            onClick={() => setReunionEspecial(true)}
+          >
+            Reunión especial
+          </button>
+        </div>
 
         <form onSubmit={handleAgendarReunion} className="stack-form">
           <div className="field">
@@ -572,32 +750,90 @@ export function InteresesReunionesPanel({
               </button>
             </div>
           </div>
-          <div className="field">
-            <label>Fecha</label>
-            <CalendarioFecha fecha={fecha} onSelect={setFecha} />
-          </div>
-          <div className="field">
-            <label htmlFor="reunion-hora">Horario disponible</label>
-            <select
-              id="reunion-hora"
-              value={horaInicio}
-              onChange={(e) => setHoraInicio(e.target.value)}
-              disabled={loadingSlots || slots.length === 0}
-            >
-              <option value="">
-                {loadingSlots
-                  ? "Buscando horarios..."
-                  : slots.length === 0
-                    ? "Sin horarios disponibles"
-                    : "Elegí un horario"}
-              </option>
-              {slots.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
+
+          {reunionEspecial ? (
+            <>
+              <div className="field">
+                <label htmlFor="reunion-tipo-especial">Motivo</label>
+                <select
+                  id="reunion-tipo-especial"
+                  value={tipoReunionEspecial}
+                  onChange={(e) => setTipoReunionEspecial(e.target.value)}
+                >
+                  {TIPOS_REUNION_ESPECIAL.map((t) => (
+                    <option key={t} value={t}>
+                      {t === "CAPACITACION" ? "Capacitación" : "Reforzamiento"}
+                    </option>
+                  ))}
+                  <option value="OTRO">Otro...</option>
+                </select>
+              </div>
+              {tipoReunionEspecial === "OTRO" && (
+                <div className="field">
+                  <label htmlFor="reunion-tipo-otro">Especificar motivo</label>
+                  <input
+                    id="reunion-tipo-otro"
+                    value={tipoReunionOtro}
+                    onChange={(e) => setTipoReunionOtro(e.target.value)}
+                    required
+                  />
+                </div>
+              )}
+              <div className="field">
+                <label htmlFor="reunion-nota">¿A qué hora y días puede el cliente?</label>
+                <textarea
+                  id="reunion-nota"
+                  rows={2}
+                  value={nota}
+                  onChange={(e) => setNota(e.target.value)}
+                  placeholder="Ej: martes y jueves después de las 3pm"
+                />
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Queda "En espera de horario" hasta que alguien le asigne fecha y hora reales
+                  desde Reuniones.
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label>Fecha</label>
+                <CalendarioFecha fecha={fecha} onSelect={setFecha} />
+              </div>
+              <div className="field">
+                <label htmlFor="reunion-hora">Horario disponible</label>
+                <select
+                  id="reunion-hora"
+                  value={horaInicio}
+                  onChange={(e) => setHoraInicio(e.target.value)}
+                  disabled={loadingSlots || slots.length === 0}
+                >
+                  <option value="">
+                    {loadingSlots
+                      ? "Buscando horarios..."
+                      : slots.length === 0
+                        ? "Sin horarios disponibles"
+                        : "Elegí un horario"}
+                  </option>
+                  {slots.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="reunion-nota">Objetivo / nota (opcional)</label>
+                <textarea
+                  id="reunion-nota"
+                  rows={2}
+                  value={nota}
+                  onChange={(e) => setNota(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
           <div className="field">
             <label htmlFor="reunion-lugar">
               {modalidad === "VIRTUAL" ? "Link de la reunión (opcional)" : "Dirección (opcional)"}
@@ -608,19 +844,14 @@ export function InteresesReunionesPanel({
               onChange={(e) => setLugarOLink(e.target.value)}
             />
           </div>
-          <div className="field">
-            <label htmlFor="reunion-nota">Objetivo / nota (opcional)</label>
-            <textarea
-              id="reunion-nota"
-              rows={2}
-              value={nota}
-              onChange={(e) => setNota(e.target.value)}
-            />
-          </div>
           {schedulingError && <p className="error-text">{schedulingError}</p>}
           <div className="form-actions">
             <button type="submit" className="btn btn-primary" disabled={scheduling}>
-              {scheduling ? "Agendando..." : "Agendar reunión"}
+              {scheduling
+                ? "Guardando..."
+                : reunionEspecial
+                  ? "Registrar reunión especial"
+                  : "Agendar reunión"}
             </button>
           </div>
         </form>

@@ -13,6 +13,7 @@ import { OportunidadesPage } from "./pages/Oportunidades";
 import { OrdenesPage } from "./pages/Ordenes";
 import { RenovacionesPage } from "./pages/Renovaciones";
 import { ReportesPage } from "./pages/Reportes";
+import { ReunionesPage } from "./pages/Reuniones";
 import { TareasPage } from "./pages/Tareas";
 
 function ProtectedLayout() {
@@ -38,6 +39,7 @@ function App() {
         <Route path="/oportunidades" element={<OportunidadesPage />} />
         <Route path="/renovaciones" element={<RenovacionesPage />} />
         <Route path="/tareas" element={<TareasPage />} />
+        <Route path="/reuniones" element={<ReunionesPage />} />
         <Route path="/reportes" element={<ReportesPage />} />
         <Route path="/configuracion" element={<ConfiguracionPage />} />
         <Route path="/ordenes" element={<OrdenesPage />} />

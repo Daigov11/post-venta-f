@@ -8,6 +8,7 @@ import { SeguimientoPostVentaDrawer } from "../components/panels/SeguimientoPost
 import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
 import { EmptyState } from "../components/ui/EmptyState";
+import { LlamarButton } from "../components/ui/LlamarButton";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EstadoPostVentaPill, NivelAlertaPill, SegmentoPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
@@ -400,9 +401,11 @@ export function ClienteFichaPage() {
         </div>
         <div className="ficha-quick-actions">
           {telefonoLimpio && (
-            <a className="btn btn-secondary" href={`tel:${telefonoLimpio}`}>
-              Llamar
-            </a>
+            <LlamarButton
+              numeroDocumentoCliente={cliente.numeroDocumentoCliente}
+              idOrdenServicio={cliente.ordenVigente.idOrdenServicio}
+              telefonoLimpio={telefonoLimpio}
+            />
           )}
           {telefonoLimpio && (
             <a

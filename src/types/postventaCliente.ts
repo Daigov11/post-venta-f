@@ -235,23 +235,37 @@ export interface InteresCatalogo {
 }
 
 export type ModalidadReunion = "VIRTUAL" | "PRESENCIAL";
-export type EstadoReunion = "PROGRAMADA" | "COMPLETADA" | "CANCELADA";
+export type EstadoReunion = "PROGRAMADA" | "COMPLETADA" | "CANCELADA" | "EN_ESPERA";
 
 export interface Reunion {
   id: number;
   numeroDocumentoCliente: string;
   idOrdenServicio: number | null;
   ejecutivo: string;
-  fecha: string;
-  horaInicio: string;
-  horaFin: string;
+  // null solo mientras estado === "EN_ESPERA" (reunion especial sin horario
+  // asignado todavia).
+  fecha: string | null;
+  horaInicio: string | null;
+  horaFin: string | null;
   modalidad: ModalidadReunion;
+  // null = reunion regular. "CAPACITACION" | "REFORZAMIENTO" | texto libre
+  // para una reunion especial.
+  tipoReunion: string | null;
   lugarOLink: string | null;
   nota: string | null;
   estado: EstadoReunion;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReunionConCliente {
+  reunion: Reunion;
+  cliente: {
+    numeroDocumentoCliente: string;
+    nombreCliente: string;
+    sistemas: ClienteSistemas;
+  } | null;
 }
 
 export interface PostVentaConfigValues {
@@ -315,6 +329,28 @@ export interface Nota {
   nota: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Incidencia registrada a mano desde la app — todavia no conectada al
+// endpoint de creacion de APIWorking (existe, se conecta mas adelante), asi
+// que no aparece en Administrativo/incidencias, solo aca.
+export interface IncidenciaManual {
+  id: number;
+  numeroDocumentoCliente: string;
+  idOrdenServicio: number | null;
+  caso: string;
+  tipo: string | null;
+  descripcion: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface Llamada {
+  id: number;
+  numeroDocumentoCliente: string;
+  idOrdenServicio: number | null;
+  usuario: string;
+  createdAt: string;
 }
 
 export type PrioridadTarea = "BAJA" | "MEDIA" | "ALTA";

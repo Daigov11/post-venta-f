@@ -6,6 +6,7 @@ import { ColumnCustomizer, type ColumnOption } from "../components/ui/ColumnCust
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { Drawer } from "../components/ui/Drawer";
 import { FilterBar } from "../components/ui/FilterBar";
+import { LlamarButton } from "../components/ui/LlamarButton";
 import { Pagination } from "../components/ui/Pagination";
 import { SearchInput } from "../components/ui/SearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
@@ -83,9 +84,11 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
           <span>{c.telefonoEfectivo}</span>
           {limpio && (
             <div style={{ display: "flex", gap: 6 }}>
-              <a className="btn btn-secondary" href={`tel:${limpio}`}>
-                Llamar
-              </a>
+              <LlamarButton
+                numeroDocumentoCliente={c.numeroDocumentoCliente}
+                idOrdenServicio={c.ordenVigente.idOrdenServicio}
+                telefonoLimpio={limpio}
+              />
               <a
                 className="btn btn-secondary"
                 href={`https://wa.me/51${limpio}`}

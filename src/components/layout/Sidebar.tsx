@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/oportunidades", label: "Oportunidades", icon: "💡" },
   { to: "/renovaciones", label: "Renovaciones", icon: "🔄" },
   { to: "/tareas", label: "Tareas", icon: "✅" },
+  { to: "/reuniones", label: "Reuniones", icon: "📅" },
   { to: "/reportes", label: "Reportes", icon: "📈" },
   { to: "/configuracion", label: "Configuración", icon: "⚙️" },
 ];
