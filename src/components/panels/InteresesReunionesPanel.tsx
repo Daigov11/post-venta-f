@@ -1,10 +1,10 @@
 import axios from "axios";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type ClipboardEvent, type FormEvent } from "react";
 import { AdjuntosGaleria } from "../ui/AdjuntosGaleria";
 import { Badge } from "../ui/Badge";
 import { CalendarioFecha } from "../ui/CalendarioFecha";
 import { EmptyState } from "../ui/EmptyState";
-import { ImagenesPicker } from "../ui/ImagenesPicker";
+import { agregarImagenes, extraerImagenesDePortapapeles, ImagenesPicker } from "../ui/ImagenesPicker";
 import { uploadAdjuntos } from "../../services/adjuntos";
 import { updateClienteMetadata } from "../../services/clientes";
 import { getIncidencias } from "../../services/incidencias";
@@ -128,6 +128,13 @@ export function InteresesReunionesPanel({
       .finally(() => setLoadingNotas(false));
   }, [numeroDocumentoCliente]);
 
+  function handlePasteNota(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pegadas = extraerImagenesDePortapapeles(event);
+    if (pegadas.length === 0) return;
+    event.preventDefault();
+    setNuevaNotaImagenes((prev) => agregarImagenes(prev, pegadas).files);
+  }
+
   async function handleGuardarNota(event: FormEvent) {
     event.preventDefault();
     if (!nuevaNota.trim()) return;
@@ -168,6 +175,13 @@ export function InteresesReunionesPanel({
       .then(setIncidenciasManuales)
       .finally(() => setLoadingIncidenciasManuales(false));
   }, [numeroDocumentoCliente]);
+
+  function handlePasteIncidencia(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pegadas = extraerImagenesDePortapapeles(event);
+    if (pegadas.length === 0) return;
+    event.preventDefault();
+    setNuevaIncidenciaImagenes((prev) => agregarImagenes(prev, pegadas).files);
+  }
 
   async function handleRegistrarIncidencia(event: FormEvent) {
     event.preventDefault();
@@ -287,6 +301,13 @@ export function InteresesReunionesPanel({
     } finally {
       setSavingNuevoInteres(false);
     }
+  }
+
+  function handlePasteReunion(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pegadas = extraerImagenesDePortapapeles(event);
+    if (pegadas.length === 0) return;
+    event.preventDefault();
+    setReunionImagenes((prev) => agregarImagenes(prev, pegadas).files);
   }
 
   async function handleAgendarReunion(event: FormEvent) {
@@ -452,6 +473,7 @@ export function InteresesReunionesPanel({
               rows={2}
               value={nuevaNota}
               onChange={(e) => setNuevaNota(e.target.value)}
+              onPaste={handlePasteNota}
               placeholder="Ej: contactado por WhatsApp, indicó que revisará el pago mañana."
             />
           </div>
@@ -601,6 +623,7 @@ export function InteresesReunionesPanel({
                 rows={3}
                 value={nuevaIncidenciaDescripcion}
                 onChange={(e) => setNuevaIncidenciaDescripcion(e.target.value)}
+                onPaste={handlePasteIncidencia}
               />
             </div>
             <ImagenesPicker files={nuevaIncidenciaImagenes} onChange={setNuevaIncidenciaImagenes} />
@@ -846,6 +869,7 @@ export function InteresesReunionesPanel({
                   rows={2}
                   value={nota}
                   onChange={(e) => setNota(e.target.value)}
+                  onPaste={handlePasteReunion}
                   placeholder="Ej: martes y jueves después de las 3pm"
                 />
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -889,6 +913,7 @@ export function InteresesReunionesPanel({
                   rows={2}
                   value={nota}
                   onChange={(e) => setNota(e.target.value)}
+                  onPaste={handlePasteReunion}
                 />
               </div>
             </>

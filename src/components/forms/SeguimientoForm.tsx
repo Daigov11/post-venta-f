@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { ImagenesPicker } from "../ui/ImagenesPicker";
+import { useState, type ClipboardEvent, type FormEvent } from "react";
+import { agregarImagenes, extraerImagenesDePortapapeles, ImagenesPicker } from "../ui/ImagenesPicker";
 import "./forms.css";
 
 export function SeguimientoForm({
@@ -20,12 +20,20 @@ export function SeguimientoForm({
     setImagenes([]);
   }
 
+  function handlePasteImagen(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const pegadas = extraerImagenesDePortapapeles(event);
+    if (pegadas.length === 0) return;
+    event.preventDefault();
+    setImagenes((prev) => agregarImagenes(prev, pegadas).files);
+  }
+
   return (
     <form onSubmit={handleSubmit} className="inline-form">
       <textarea
         rows={2}
         value={comentario}
         onChange={(event) => setComentario(event.target.value)}
+        onPaste={handlePasteImagen}
         placeholder="Agregar seguimiento..."
         required
       />
