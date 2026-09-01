@@ -12,6 +12,7 @@ import { SearchInput } from "../components/ui/SearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
 import { SistemasBadges } from "../components/ui/SistemasBadges";
 import { EstadoPostVentaPill, SegmentoPill } from "../components/ui/StatusPill";
+import { WhatsAppButton } from "../components/ui/WhatsAppButton";
 import { SavedViewForm } from "../components/forms/SavedViewForm";
 import type { ClientesQueryParams } from "../services/clientes";
 import { getClienteIntereses } from "../services/intereses";
@@ -30,6 +31,11 @@ import "./Clientes.css";
 
 const SCREEN = "clientes";
 const COLUMNS_STORAGE_KEY = "pv_clientes_columns";
+// sessionStorage (no localStorage): se recuerda mientras se navega de ida y
+// vuelta a la ficha de un cliente en esta misma sesion del navegador, pero
+// no queda pegado para siempre entre visitas distintas — a diferencia de
+// visibleColumns, que si es una preferencia de largo plazo.
+const FILTERS_STORAGE_KEY = "pv_clientes_filtros_sesion";
 const PAGE_SIZE = 25;
 
 const SORT_FIELD_BY_COLUMN: Record<string, string> = {
@@ -89,14 +95,11 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
                 idOrdenServicio={c.ordenVigente.idOrdenServicio}
                 telefonoLimpio={limpio}
               />
-              <a
-                className="btn btn-secondary"
-                href={`https://wa.me/51${limpio}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                WhatsApp
-              </a>
+              <WhatsAppButton
+                numeroDocumentoCliente={c.numeroDocumentoCliente}
+                idOrdenServicio={c.ordenVigente.idOrdenServicio}
+                telefonoLimpio={limpio}
+              />
             </div>
           )}
         </div>
@@ -340,6 +343,32 @@ const DEFAULT_FILTERS: FiltersState = {
   sinActividadReciente: "",
 };
 
+interface EstadoGuardado {
+  filters: FiltersState;
+  sortBy: string | undefined;
+  sortDir: "asc" | "desc";
+  page: number;
+}
+
+// Se lee una sola vez al montar la pagina — si venis de "Volver" desde la
+// ficha de un cliente, la pestaña nunca se cerro, sessionStorage sigue
+// teniendo lo ultimo que quedo guardado.
+function cargarEstadoGuardado(): EstadoGuardado | null {
+  try {
+    const stored = sessionStorage.getItem(FILTERS_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as Partial<EstadoGuardado>;
+    return {
+      filters: { ...DEFAULT_FILTERS, ...parsed.filters },
+      sortBy: parsed.sortBy,
+      sortDir: parsed.sortDir === "desc" ? "desc" : "asc",
+      page: typeof parsed.page === "number" && parsed.page > 0 ? parsed.page : 1,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function toQueryParams(
   filters: FiltersState,
   sortBy: string | undefined,
@@ -379,11 +408,14 @@ function toQueryParams(
 }
 
 export function ClientesPage() {
-  const [filters, setFilters] = useState<FiltersState>(DEFAULT_FILTERS);
+  const estadoGuardado = useMemo(() => cargarEstadoGuardado(), []);
+  const [filters, setFilters] = useState<FiltersState>(
+    () => estadoGuardado?.filters ?? DEFAULT_FILTERS
+  );
   const [showMoreFilters, setShowMoreFilters] = useState(false);
-  const [sortBy, setSortBy] = useState<string | undefined>(undefined);
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-  const [page, setPage] = useState(1);
+  const [sortBy, setSortBy] = useState<string | undefined>(() => estadoGuardado?.sortBy);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => estadoGuardado?.sortDir ?? "asc");
+  const [page, setPage] = useState(() => estadoGuardado?.page ?? 1);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
@@ -407,6 +439,18 @@ export function ClientesPage() {
   useEffect(() => {
     localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns));
   }, [visibleColumns]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        FILTERS_STORAGE_KEY,
+        JSON.stringify({ filters, sortBy, sortDir, page })
+      );
+    } catch {
+      // ignorar storage lleno/bloqueado — el peor caso es volver a arrancar
+      // sin filtros guardados, no rompe nada
+    }
+  }, [filters, sortBy, sortDir, page]);
 
   function cargarAccionData(numeroDocumentoCliente: string) {
     setAccionLoading(true);

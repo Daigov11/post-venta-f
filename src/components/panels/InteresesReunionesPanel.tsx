@@ -86,6 +86,14 @@ export function InteresesReunionesPanel({
   const [incidencias, setIncidencias] = useState<Incidencia[] | null>(null);
   const [loadingIncidencias, setLoadingIncidencias] = useState(false);
   const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
+  const [filtroIncidencias, setFiltroIncidencias] = useState<"todas" | "abiertas" | "resueltas">(
+    "todas"
+  );
+  const incidenciasFiltradas = (incidencias ?? []).filter((inc) => {
+    if (filtroIncidencias === "abiertas") return !inc.resuelta;
+    if (filtroIncidencias === "resueltas") return inc.resuelta;
+    return true;
+  });
 
   async function handleVerIncidencias() {
     setLoadingIncidencias(true);
@@ -455,18 +463,43 @@ export function InteresesReunionesPanel({
           <EmptyState title="Sin incidencias registradas" />
         )}
         {incidencias !== null && incidencias.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {incidencias.map((inc) => (
-              <div key={inc.idIncidencia} style={{ fontSize: 13 }}>
-                <Badge tone={inc.resuelta ? "success" : "warning"}>
-                  {inc.resuelta ? "Resuelta" : "Abierta"}
-                </Badge>{" "}
-                <strong>{inc.fecha ? new Date(inc.fecha).toLocaleDateString("es-PE") : "Sin fecha"}</strong>
-                {" — "}
-                {inc.caso || inc.tipo}
-              </div>
-            ))}
-          </div>
+          <>
+            <div className="modulo-clientes-periodo">
+              {(
+                [
+                  { value: "todas", label: "Todas" },
+                  { value: "abiertas", label: "Abiertas" },
+                  { value: "resueltas", label: "Resueltas" },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  className={filtroIncidencias === f.value ? "btn btn-primary" : "btn btn-secondary"}
+                  onClick={() => setFiltroIncidencias(f.value)}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {incidenciasFiltradas.length === 0 && (
+              <EmptyState title="Sin incidencias para este filtro" />
+            )}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {incidenciasFiltradas.map((inc) => (
+                <div key={inc.idIncidencia} style={{ fontSize: 13 }}>
+                  <Badge tone={inc.resuelta ? "success" : "warning"}>
+                    {inc.resuelta ? "Resuelta" : "Abierta"}
+                  </Badge>{" "}
+                  <strong>
+                    {inc.fecha ? new Date(inc.fecha).toLocaleDateString("es-PE") : "Sin fecha"}
+                  </strong>
+                  {" — "}
+                  {inc.caso || inc.tipo}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </section>
 

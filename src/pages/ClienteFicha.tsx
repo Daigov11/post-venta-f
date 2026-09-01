@@ -11,6 +11,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { LlamarButton } from "../components/ui/LlamarButton";
 import { Skeleton } from "../components/ui/Skeleton";
 import { EstadoPostVentaPill, NivelAlertaPill, SegmentoPill } from "../components/ui/StatusPill";
+import { WhatsAppButton } from "../components/ui/WhatsAppButton";
 import { useAuth } from "../context/AuthContext";
 import { useCliente } from "../hooks/useCliente";
 import { useSeguimientos } from "../hooks/useSeguimientos";
@@ -168,6 +169,9 @@ export function ClienteFichaPage() {
   } | null>(null);
   const [loadingIncidencias, setLoadingIncidencias] = useState(false);
   const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
+  const [filtroIncidencias, setFiltroIncidencias] = useState<"todas" | "abiertas" | "resueltas">(
+    "todas"
+  );
 
   const [usuarioCopiado, setUsuarioCopiado] = useState<string | null>(null);
   async function handleCopiar(texto: string, marcador: string) {
@@ -291,6 +295,11 @@ export function ClienteFichaPage() {
   // Defensivo: mismo caso que sistemas (ver SistemasBadges) — en produccion
   // se vio undefined para algun cliente pese al tipo no-nullable.
   const usuarios = cliente.usuarios ?? [];
+  const incidenciasFiltradas = (incidenciasResp?.data ?? []).filter((inc) => {
+    if (filtroIncidencias === "abiertas") return !inc.resuelta;
+    if (filtroIncidencias === "resueltas") return inc.resuelta;
+    return true;
+  });
   const ultimoPago = cliente.ordenVigente.pagos
     .filter((p) => p.fechaEmitido !== null)
     .reduce<(typeof cliente.ordenVigente.pagos)[number] | null>(
@@ -408,14 +417,11 @@ export function ClienteFichaPage() {
             />
           )}
           {telefonoLimpio && (
-            <a
-              className="btn btn-secondary"
-              href={`https://wa.me/51${telefonoLimpio}`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              WhatsApp
-            </a>
+            <WhatsAppButton
+              numeroDocumentoCliente={cliente.numeroDocumentoCliente}
+              idOrdenServicio={cliente.ordenVigente.idOrdenServicio}
+              telefonoLimpio={telefonoLimpio}
+            />
           )}
           {cliente.ordenVigente.linkSistema && (
             <a
@@ -963,6 +969,13 @@ export function ClienteFichaPage() {
             {cliente.documentacionGlobal.disponibles}/{cliente.documentacionGlobal.total} documentos
             ({cliente.documentacionGlobal.porcentaje}%)
           </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {cliente.documentacionGlobal.detalle.map((d) => (
+              <Badge key={d.clave} tone={d.disponible ? "success" : "critical"}>
+                {d.disponible ? "✓" : "✗"} {d.etiqueta}
+              </Badge>
+            ))}
+          </div>
         </section>
 
         <section className="card ficha-section">
@@ -1071,16 +1084,39 @@ export function ClienteFichaPage() {
           )}
           {errorIncidencias && <p className="error-text">{errorIncidencias}</p>}
           {incidenciasResp !== null && incidenciasResp.total > 0 && (
-            <p className="muted">
-              {incidenciasResp.abiertas} abierta(s) · {incidenciasResp.resueltas} resuelta(s)
-            </p>
+            <>
+              <p className="muted">
+                {incidenciasResp.abiertas} abierta(s) · {incidenciasResp.resueltas} resuelta(s)
+              </p>
+              <div className="modulo-clientes-periodo">
+                {(
+                  [
+                    { value: "todas", label: "Todas" },
+                    { value: "abiertas", label: "Abiertas" },
+                    { value: "resueltas", label: "Resueltas" },
+                  ] as const
+                ).map((f) => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    className={filtroIncidencias === f.value ? "btn btn-primary" : "btn btn-secondary"}
+                    onClick={() => setFiltroIncidencias(f.value)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {incidenciasResp !== null && incidenciasResp.total === 0 && (
             <EmptyState title="Sin incidencias registradas" />
           )}
-          {incidenciasResp !== null && incidenciasResp.data.length > 0 && (
+          {incidenciasResp !== null && incidenciasResp.total > 0 && incidenciasFiltradas.length === 0 && (
+            <EmptyState title="Sin incidencias para este filtro" />
+          )}
+          {incidenciasFiltradas.length > 0 && (
             <div className="ficha-field-list">
-              {incidenciasResp.data.map((inc) => (
+              {incidenciasFiltradas.map((inc) => (
                 <div key={inc.idIncidencia} className="historial-seguimiento-item">
                   <div className="historial-seguimiento-item-header">
                     <IncidenciaEstadoBadge resuelta={inc.resuelta} />

@@ -1,10 +1,10 @@
 import { createContacto } from "../../services/contactos";
 
-// Boton "Llamar" compartido — ademas de abrir tel:, deja registrado que
-// alguien del equipo hizo clic para llamar a este cliente (fire-and-forget,
-// no bloquea ni interrumpe el tel: si falla el registro). Ver WhatsAppButton
-// para el equivalente por WhatsApp — mismo registro, canal distinto.
-export function LlamarButton({
+// Boton "WhatsApp" compartido — siempre abre en pestaña nueva (target
+// _blank, no reemplaza la pantalla actual) y deja registrado que alguien del
+// equipo se comunico por este canal (fire-and-forget, no bloquea el enlace
+// si falla el registro). Ver LlamarButton para el equivalente por llamada.
+export function WhatsAppButton({
   numeroDocumentoCliente,
   idOrdenServicio,
   telefonoLimpio,
@@ -18,16 +18,18 @@ export function LlamarButton({
   return (
     <a
       className={className ?? "btn btn-secondary"}
-      href={`tel:${telefonoLimpio}`}
+      href={`https://wa.me/51${telefonoLimpio}`}
+      target="_blank"
+      rel="noreferrer"
       onClick={() => {
         createContacto({
           numeroDocumentoCliente,
           idOrdenServicio: idOrdenServicio ?? null,
-          canal: "LLAMADA",
+          canal: "WHATSAPP",
         }).catch(() => {});
       }}
     >
-      Llamar
+      WhatsApp
     </a>
   );
 }

@@ -13,6 +13,7 @@ import type { Alerta, ClienteSistemas, NivelAlerta } from "../types/postventaCli
 // tambien — no hay un endpoint que liste los tipos posibles.
 const TIPOS_ALERTA: { value: string; label: string }[] = [
   { value: "DEUDA_PENDIENTE", label: "Deuda pendiente" },
+  { value: "ALTA_PENDIENTE", label: "Alta pendiente" },
   { value: "SIN_EQUIPO", label: "Cliente sin equipo" },
   { value: "DOCUMENTACION_INCOMPLETA", label: "Documentación incompleta" },
   { value: "SIN_COMPROBANTES", label: "Sin comprobantes emitidos" },

@@ -46,6 +46,23 @@ export interface PostVentaExtra {
   fechaInstalacion: string | null;
 }
 
+// Los 4 slots de documentacion de APIWorking (existeFile1..4) confirmados
+// con el negocio — orden fijo: Carta, Foto DNI, Clave SOL, Pagos.
+export type ClaveDocumento = "CARTA" | "FOTO_DNI" | "CLAVE_SOL" | "PAGOS";
+
+export interface DocumentoDetalle {
+  clave: ClaveDocumento;
+  etiqueta: string;
+  disponible: boolean;
+}
+
+export interface DocumentacionResumen {
+  disponibles: number;
+  total: number;
+  porcentaje: number;
+  detalle: DocumentoDetalle[];
+}
+
 export interface OsRefResumen {
   idOrdenServicio: number;
   numeroOs: string;
@@ -61,7 +78,7 @@ export interface OsRefResumen {
   deudaProyectada: number;
   existeEquipo: boolean;
   idEquipo: string | null;
-  documentacion: { disponibles: number; total: number; porcentaje: number };
+  documentacion: DocumentacionResumen;
   facturas: { disponibles: number; equipoDisponibles: number };
   cantidadComprobantes: number;
   distribuidor: { id: string | null; nombre: string | null } | null;
@@ -112,7 +129,7 @@ export interface PostVentaCliente {
   antiguedad:
     | { texto: string; meses: number }
     | { texto: "No determinado"; meses: null };
-  documentacionGlobal: { disponibles: number; total: number; porcentaje: number };
+  documentacionGlobal: DocumentacionResumen;
   cantidadComprobantesHistorico: number;
 
   ultimoVencimientoPago: string | null;
@@ -140,6 +157,7 @@ export interface PostVentaCliente {
   baseDatos: string | null;
   diasSinActividad: number | null;
   sinActividadReciente: boolean;
+  altaPendiente: boolean;
 
   metadata: {
     notasCount: number;
@@ -345,10 +363,13 @@ export interface IncidenciaManual {
   createdAt: string;
 }
 
-export interface Llamada {
+export type CanalContacto = "LLAMADA" | "WHATSAPP";
+
+export interface Contacto {
   id: number;
   numeroDocumentoCliente: string;
   idOrdenServicio: number | null;
+  canal: CanalContacto;
   usuario: string;
   createdAt: string;
 }
