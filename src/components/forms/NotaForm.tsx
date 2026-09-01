@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ImagenesPicker } from "../ui/ImagenesPicker";
 import "./forms.css";
 
 export function NotaForm({
@@ -6,17 +7,19 @@ export function NotaForm({
   onCancel,
   submitting,
 }: {
-  onSubmit: (nota: string) => void;
+  onSubmit: (nota: string, imagenes: File[]) => void;
   onCancel?: () => void;
   submitting?: boolean;
 }) {
   const [nota, setNota] = useState("");
+  const [imagenes, setImagenes] = useState<File[]>([]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!nota.trim()) return;
-    onSubmit(nota.trim());
+    onSubmit(nota.trim(), imagenes);
     setNota("");
+    setImagenes([]);
   }
 
   return (
@@ -31,6 +34,7 @@ export function NotaForm({
           required
         />
       </div>
+      <ImagenesPicker files={imagenes} onChange={setImagenes} />
       <div className="form-actions">
         {onCancel && (
           <button type="button" className="btn btn-secondary" onClick={onCancel}>

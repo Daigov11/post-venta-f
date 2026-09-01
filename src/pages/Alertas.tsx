@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { AccionesClienteDrawer, columnaAccionesCliente } from "../components/panels/AccionesClienteDrawer";
+import { Badge } from "../components/ui/Badge";
 import { ClienteCell } from "../components/ui/ClienteCell";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { NivelAlertaPill } from "../components/ui/StatusPill";
 import { useAlertas } from "../hooks/useAlertas";
+import { marcarEstadoAlerta, reabrirAlerta } from "../services/alertas";
 import type { Alerta, ClienteSistemas, NivelAlerta } from "../types/postventaCliente";
 
 // Mismos tipos que emite el motor de alertas (ver alertaRules en
@@ -14,6 +16,8 @@ import type { Alerta, ClienteSistemas, NivelAlerta } from "../types/postventaCli
 const TIPOS_ALERTA: { value: string; label: string }[] = [
   { value: "DEUDA_PENDIENTE", label: "Deuda pendiente" },
   { value: "ALTA_PENDIENTE", label: "Alta pendiente" },
+  { value: "CERTIFICADO_VENCE_HOY", label: "Certificado vence hoy" },
+  { value: "CERTIFICADO_POR_VENCER", label: "Certificado por vencer" },
   { value: "SIN_EQUIPO", label: "Cliente sin equipo" },
   { value: "DOCUMENTACION_INCOMPLETA", label: "Documentación incompleta" },
   { value: "SIN_COMPROBANTES", label: "Sin comprobantes emitidos" },
@@ -64,8 +68,42 @@ function agruparPorCliente(alertas: Alerta[]): ClienteAlertas[] {
 export function AlertasPage() {
   const [nivel, setNivel] = useState<NivelAlerta | "">("");
   const [tipo, setTipo] = useState("");
-  const { data, loading, error } = useAlertas({ nivel: nivel || undefined, tipo: tipo || undefined });
+  const [vista, setVista] = useState<"activas" | "resueltas">("activas");
+  const { data, loading, error, refetch } = useAlertas({
+    nivel: nivel || undefined,
+    tipo: tipo || undefined,
+    estado: vista === "resueltas" ? "RESUELTA" : undefined,
+  });
   const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
+  const [procesando, setProcesando] = useState<Set<string>>(new Set());
+
+  async function handleMarcarEstado(alerta: Alerta, estado: "VISTA" | "RESUELTA") {
+    setProcesando((prev) => new Set(prev).add(alerta.id));
+    try {
+      await marcarEstadoAlerta(alerta.id, alerta.cliente, estado);
+      refetch();
+    } finally {
+      setProcesando((prev) => {
+        const next = new Set(prev);
+        next.delete(alerta.id);
+        return next;
+      });
+    }
+  }
+
+  async function handleReabrir(alerta: Alerta) {
+    setProcesando((prev) => new Set(prev).add(alerta.id));
+    try {
+      await reabrirAlerta(alerta.id);
+      refetch();
+    } finally {
+      setProcesando((prev) => {
+        const next = new Set(prev);
+        next.delete(alerta.id);
+        return next;
+      });
+    }
+  }
 
   const clientes = useMemo(() => agruparPorCliente(data?.data ?? []), [data]);
 
@@ -97,20 +135,57 @@ export function AlertasPage() {
         key: "detalle",
         label: "Detalle",
         render: (g) => (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {g.alertas.map((a) => (
-              <div key={a.id} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <NivelAlertaPill nivel={a.nivel} />
-                <span>
-                  <strong>{a.titulo}</strong> — {a.mensaje}
-                </span>
-              </div>
-            ))}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {g.alertas.map((a) => {
+              const disabled = procesando.has(a.id);
+              return (
+                <div key={a.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 6 }}>
+                  <NivelAlertaPill nivel={a.nivel} />
+                  <span>
+                    <strong>{a.titulo}</strong> — {a.mensaje}
+                  </span>
+                  {a.estado === "VISTA" && <Badge tone="info">Vista</Badge>}
+                  {a.estado === "RESUELTA" && <Badge tone="success">Resuelta</Badge>}
+                  {a.estado !== "RESUELTA" && (
+                    <>
+                      {a.estado !== "VISTA" && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost"
+                          disabled={disabled}
+                          onClick={() => handleMarcarEstado(a, "VISTA")}
+                        >
+                          Marcar vista
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        disabled={disabled}
+                        onClick={() => handleMarcarEstado(a, "RESUELTA")}
+                      >
+                        Marcar resuelta
+                      </button>
+                    </>
+                  )}
+                  {a.estado === "RESUELTA" && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={disabled}
+                      onClick={() => handleReabrir(a)}
+                    >
+                      Reabrir
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ),
       },
     ],
-    []
+    [procesando]
   );
 
   return (
@@ -123,6 +198,23 @@ export function AlertasPage() {
             varias alertas a la vez, agrupadas en una sola fila.
           </div>
         </div>
+      </div>
+
+      <div className="modulo-clientes-periodo" style={{ marginBottom: 12 }}>
+        <button
+          type="button"
+          className={vista === "activas" ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => setVista("activas")}
+        >
+          Activas
+        </button>
+        <button
+          type="button"
+          className={vista === "resueltas" ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => setVista("resueltas")}
+        >
+          Resueltas
+        </button>
       </div>
 
       <FilterBar>
@@ -160,7 +252,11 @@ export function AlertasPage() {
           rows={clientes}
           rowKey={(g) => g.numeroDocumentoCliente}
           loading={loading}
-          emptyMessage="No hay alertas para este filtro."
+          emptyMessage={
+            vista === "resueltas"
+              ? "No hay alertas resueltas para este filtro."
+              : "No hay alertas para este filtro."
+          }
         />
       </div>
 

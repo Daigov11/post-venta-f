@@ -1,20 +1,23 @@
 import { useState, type FormEvent } from "react";
+import { ImagenesPicker } from "../ui/ImagenesPicker";
 import "./forms.css";
 
 export function SeguimientoForm({
   onSubmit,
   submitting,
 }: {
-  onSubmit: (comentario: string) => void;
+  onSubmit: (comentario: string, imagenes: File[]) => void;
   submitting?: boolean;
 }) {
   const [comentario, setComentario] = useState("");
+  const [imagenes, setImagenes] = useState<File[]>([]);
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!comentario.trim()) return;
-    onSubmit(comentario.trim());
+    onSubmit(comentario.trim(), imagenes);
     setComentario("");
+    setImagenes([]);
   }
 
   return (
@@ -26,6 +29,7 @@ export function SeguimientoForm({
         placeholder="Agregar seguimiento..."
         required
       />
+      <ImagenesPicker files={imagenes} onChange={setImagenes} />
       <button type="submit" className="btn btn-primary" disabled={submitting}>
         {submitting ? "Enviando..." : "Agregar"}
       </button>

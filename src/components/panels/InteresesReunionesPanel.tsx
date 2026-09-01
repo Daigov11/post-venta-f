@@ -1,8 +1,11 @@
 import axios from "axios";
 import { useEffect, useState, type FormEvent } from "react";
+import { AdjuntosGaleria } from "../ui/AdjuntosGaleria";
 import { Badge } from "../ui/Badge";
 import { CalendarioFecha } from "../ui/CalendarioFecha";
 import { EmptyState } from "../ui/EmptyState";
+import { ImagenesPicker } from "../ui/ImagenesPicker";
+import { uploadAdjuntos } from "../../services/adjuntos";
 import { updateClienteMetadata } from "../../services/clientes";
 import { getIncidencias } from "../../services/incidencias";
 import {
@@ -115,6 +118,7 @@ export function InteresesReunionesPanel({
   const [notas, setNotas] = useState<Nota[]>([]);
   const [loadingNotas, setLoadingNotas] = useState(false);
   const [nuevaNota, setNuevaNota] = useState("");
+  const [nuevaNotaImagenes, setNuevaNotaImagenes] = useState<File[]>([]);
   const [savingNota, setSavingNota] = useState(false);
 
   useEffect(() => {
@@ -134,8 +138,12 @@ export function InteresesReunionesPanel({
         idOrdenServicio,
         nota: nuevaNota.trim(),
       });
+      if (nuevaNotaImagenes.length > 0) {
+        await uploadAdjuntos("NOTA", creada.id, nuevaNotaImagenes);
+      }
       setNotas((prev) => [creada, ...prev]);
       setNuevaNota("");
+      setNuevaNotaImagenes([]);
     } finally {
       setSavingNota(false);
     }
@@ -151,6 +159,7 @@ export function InteresesReunionesPanel({
   const [nuevaIncidenciaCaso, setNuevaIncidenciaCaso] = useState("");
   const [nuevaIncidenciaTipo, setNuevaIncidenciaTipo] = useState("");
   const [nuevaIncidenciaDescripcion, setNuevaIncidenciaDescripcion] = useState("");
+  const [nuevaIncidenciaImagenes, setNuevaIncidenciaImagenes] = useState<File[]>([]);
   const [savingIncidenciaManual, setSavingIncidenciaManual] = useState(false);
 
   useEffect(() => {
@@ -172,10 +181,14 @@ export function InteresesReunionesPanel({
         tipo: nuevaIncidenciaTipo || null,
         descripcion: nuevaIncidenciaDescripcion.trim() || null,
       });
+      if (nuevaIncidenciaImagenes.length > 0) {
+        await uploadAdjuntos("INCIDENCIA_MANUAL", creada.id, nuevaIncidenciaImagenes);
+      }
       setIncidenciasManuales((prev) => [creada, ...prev]);
       setNuevaIncidenciaCaso("");
       setNuevaIncidenciaTipo("");
       setNuevaIncidenciaDescripcion("");
+      setNuevaIncidenciaImagenes([]);
       setNuevaIncidenciaAbierta(false);
     } finally {
       setSavingIncidenciaManual(false);
@@ -197,6 +210,7 @@ export function InteresesReunionesPanel({
   const [horaInicio, setHoraInicio] = useState("");
   const [lugarOLink, setLugarOLink] = useState("");
   const [nota, setNota] = useState("");
+  const [reunionImagenes, setReunionImagenes] = useState<File[]>([]);
   const [slots, setSlots] = useState<string[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [schedulingError, setSchedulingError] = useState<string | null>(null);
@@ -291,7 +305,7 @@ export function InteresesReunionesPanel({
       }
       setScheduling(true);
       try {
-        await createReunion({
+        const creada = await createReunion({
           numeroDocumentoCliente,
           idOrdenServicio,
           ejecutivo: ejecutivo.trim(),
@@ -300,8 +314,12 @@ export function InteresesReunionesPanel({
           lugarOLink: lugarOLink.trim() || null,
           nota: nota.trim() || null,
         });
+        if (reunionImagenes.length > 0) {
+          await uploadAdjuntos("REUNION", creada.id, reunionImagenes);
+        }
         setLugarOLink("");
         setNota("");
+        setReunionImagenes([]);
         setReunionEspecial(false);
         onChanged();
       } catch (error) {
@@ -326,7 +344,7 @@ export function InteresesReunionesPanel({
     }
     setScheduling(true);
     try {
-      await createReunion({
+      const creada = await createReunion({
         numeroDocumentoCliente,
         idOrdenServicio,
         ejecutivo: ejecutivo.trim(),
@@ -336,9 +354,13 @@ export function InteresesReunionesPanel({
         lugarOLink: lugarOLink.trim() || null,
         nota: nota.trim() || null,
       });
+      if (reunionImagenes.length > 0) {
+        await uploadAdjuntos("REUNION", creada.id, reunionImagenes);
+      }
       setHoraInicio("");
       setLugarOLink("");
       setNota("");
+      setReunionImagenes([]);
       onChanged();
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.data?.message) {
@@ -419,6 +441,7 @@ export function InteresesReunionesPanel({
                 <strong>{new Date(n.createdAt).toLocaleString("es-PE")}</strong>
                 {" — "}
                 {n.usuario}: {n.nota}
+                <AdjuntosGaleria entidadTipo="NOTA" entidadId={n.id} />
               </div>
             ))}
           </div>
@@ -432,6 +455,7 @@ export function InteresesReunionesPanel({
               placeholder="Ej: contactado por WhatsApp, indicó que revisará el pago mañana."
             />
           </div>
+          <ImagenesPicker files={nuevaNotaImagenes} onChange={setNuevaNotaImagenes} />
           <div className="form-actions">
             <button type="submit" className="btn btn-secondary" disabled={savingNota}>
               {savingNota ? "Guardando..." : "Guardar nota"}
@@ -525,6 +549,7 @@ export function InteresesReunionesPanel({
                     {inc.descripcion}
                   </div>
                 )}
+                <AdjuntosGaleria entidadTipo="INCIDENCIA_MANUAL" entidadId={inc.id} />
               </div>
             ))}
           </div>
@@ -578,6 +603,7 @@ export function InteresesReunionesPanel({
                 onChange={(e) => setNuevaIncidenciaDescripcion(e.target.value)}
               />
             </div>
+            <ImagenesPicker files={nuevaIncidenciaImagenes} onChange={setNuevaIncidenciaImagenes} />
             <div className="form-actions">
               <button
                 type="button"
@@ -695,6 +721,7 @@ export function InteresesReunionesPanel({
                   {" · "}
                   {r.ejecutivo}
                   {r.tipoReunion && ` · ${r.tipoReunion}`}
+                  <AdjuntosGaleria entidadTipo="REUNION" entidadId={r.id} />
                 </span>
                 <span className="ficha-field-value">
                   <Badge
@@ -866,6 +893,8 @@ export function InteresesReunionesPanel({
               </div>
             </>
           )}
+
+          <ImagenesPicker files={reunionImagenes} onChange={setReunionImagenes} />
 
           <div className="field">
             <label htmlFor="reunion-lugar">

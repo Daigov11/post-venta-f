@@ -5,6 +5,7 @@ import { SeguimientoForm } from "../components/forms/SeguimientoForm";
 import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
 import { SeguimientoPostVentaDrawer } from "../components/panels/SeguimientoPostVentaDrawer";
+import { AdjuntosGaleria } from "../components/ui/AdjuntosGaleria";
 import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -15,6 +16,7 @@ import { WhatsAppButton } from "../components/ui/WhatsAppButton";
 import { useAuth } from "../context/AuthContext";
 import { useCliente } from "../hooks/useCliente";
 import { useSeguimientos } from "../hooks/useSeguimientos";
+import { uploadAdjuntos } from "../services/adjuntos";
 import { refreshSystemUsersOne, updateClienteMetadata } from "../services/clientes";
 import { getHistorialSeguimiento } from "../services/historial";
 import { getIncidencias } from "../services/incidencias";
@@ -65,10 +67,13 @@ function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }
   const [addingSeguimiento, setAddingSeguimiento] = useState(false);
   const [updatingEstado, setUpdatingEstado] = useState(false);
 
-  async function handleAddSeguimiento(comentario: string) {
+  async function handleAddSeguimiento(comentario: string, imagenes: File[]) {
     setAddingSeguimiento(true);
     try {
-      await createSeguimiento(tarea.id, comentario);
+      const creado = await createSeguimiento(tarea.id, comentario);
+      if (imagenes.length > 0) {
+        await uploadAdjuntos("TAREA_SEGUIMIENTO", creado.id, imagenes);
+      }
       refetch();
     } finally {
       setAddingSeguimiento(false);
@@ -124,6 +129,7 @@ function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }
                 <div className="seguimiento-item-meta">
                   {s.usuario} · {new Date(s.createdAt).toLocaleString("es-PE")}
                 </div>
+                <AdjuntosGaleria entidadTipo="TAREA_SEGUIMIENTO" entidadId={s.id} />
               </div>
             ))}
           </div>
@@ -242,10 +248,13 @@ export function ClienteFichaPage() {
     }
   }
 
-  async function handleAddNota(nota: string) {
+  async function handleAddNota(nota: string, imagenes: File[]) {
     setSavingNota(true);
     try {
-      await createNota({ numeroDocumentoCliente, nota });
+      const creada = await createNota({ numeroDocumentoCliente, nota });
+      if (imagenes.length > 0) {
+        await uploadAdjuntos("NOTA", creada.id, imagenes);
+      }
       setNotaDrawerOpen(false);
       refetch();
     } finally {
@@ -1239,6 +1248,7 @@ export function ClienteFichaPage() {
                   <div className="seguimiento-item-meta">
                     {n.usuario} · {new Date(n.createdAt).toLocaleString("es-PE")}
                   </div>
+                  <AdjuntosGaleria entidadTipo="NOTA" entidadId={n.id} />
                 </div>
               ))}
             </div>

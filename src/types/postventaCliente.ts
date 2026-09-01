@@ -158,6 +158,8 @@ export interface PostVentaCliente {
   diasSinActividad: number | null;
   sinActividadReciente: boolean;
   altaPendiente: boolean;
+  certificadoPorVencer: boolean;
+  certificadoVenceHoy: boolean;
 
   metadata: {
     notasCount: number;
@@ -310,6 +312,10 @@ export interface PostVentaConfigValues {
   "seguimiento.fecha_corte_clientes_nuevos": string;
 }
 
+// ABIERTA = calculado. VISTA/RESUELTA son marcas manuales — una vez
+// RESUELTA queda asi hasta que alguien la reabra a mano.
+export type EstadoAlerta = "ABIERTA" | "VISTA" | "RESUELTA";
+
 export interface Alerta {
   id: string;
   tipo: string;
@@ -322,7 +328,7 @@ export interface Alerta {
   idOrdenServicio: number | null;
   fecha: string;
   origen: string;
-  estado: "ABIERTA";
+  estado: EstadoAlerta;
 }
 
 export interface Oportunidad {
@@ -347,6 +353,20 @@ export interface Nota {
   nota: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type EntidadAdjunto = "NOTA" | "TAREA_SEGUIMIENTO" | "REUNION" | "INCIDENCIA_MANUAL";
+
+export interface Adjunto {
+  id: number;
+  entidadTipo: EntidadAdjunto;
+  entidadId: number;
+  url: string;
+  nombreOriginal: string;
+  mimeType: string;
+  tamanoBytes: number;
+  usuario: string;
+  createdAt: string;
 }
 
 // Incidencia registrada a mano desde la app — todavia no conectada al

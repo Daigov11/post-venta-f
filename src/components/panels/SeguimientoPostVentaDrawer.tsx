@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { AdjuntosGaleria } from "../ui/AdjuntosGaleria";
 import { Badge, type BadgeTone } from "../ui/Badge";
 import { Drawer } from "../ui/Drawer";
 import { Skeleton } from "../ui/Skeleton";
 import { NotaForm } from "../forms/NotaForm";
 import { extractErrorMessage } from "../../hooks/useAsyncData";
+import { uploadAdjuntos } from "../../services/adjuntos";
 import { createNota } from "../../services/notas";
 import {
   getSeguimientoDetalle,
@@ -94,14 +96,17 @@ export function SeguimientoPostVentaDrawer({
     }
   }
 
-  async function handleAgregarNota(nota: string) {
+  async function handleAgregarNota(nota: string, imagenes: File[]) {
     setSavingNota(true);
     try {
-      await createNota({
+      const creada = await createNota({
         numeroDocumentoCliente,
         idOrdenServicio: detalle?.cliente.idOrdenServicio ?? null,
         nota,
       });
+      if (imagenes.length > 0) {
+        await uploadAdjuntos("NOTA", creada.id, imagenes);
+      }
       setNotaAbierta(false);
       cargar();
     } finally {
@@ -206,6 +211,7 @@ export function SeguimientoPostVentaDrawer({
                     <div className="muted">
                       {n.usuario} · {new Date(n.createdAt).toLocaleString("es-PE")}
                     </div>
+                    <AdjuntosGaleria entidadTipo="NOTA" entidadId={n.id} />
                   </div>
                 ))}
               </div>
