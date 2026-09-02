@@ -58,10 +58,13 @@ const PERIODICIDADES: { value: Periodicidad; label: string }[] = [
 // (sincronizarTareasRenovacion) para todo cliente en ventana de renovacion,
 // una tarea abierta a la vez. "Contactar" cierra la tarea (estado -> el
 // mismo EstadoTarea de siempre, reinterpretado aca como "contactado o no").
+type FiltroContacto = "todos" | "contactados" | "noContactados";
+
 function TareasRenovacionPanel() {
   const { data, loading, error, refetch } = useTareasRenovacion();
   const [abierto, setAbierto] = useState(true);
   const [periodicidad, setPeriodicidad] = useState<Periodicidad | "">("");
+  const [filtroContacto, setFiltroContacto] = useState<FiltroContacto>("todos");
   const [ordenIngresos, setOrdenIngresos] = useState<"asc" | "desc" | null>(null);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
   const [marcandoId, setMarcandoId] = useState<number | null>(null);
@@ -69,6 +72,11 @@ function TareasRenovacionPanel() {
   const filas = useMemo(() => {
     let filas = data ?? [];
     if (periodicidad) filas = filas.filter((f) => f.cliente.periodicidad === periodicidad);
+    if (filtroContacto === "contactados") {
+      filas = filas.filter((f) => f.tarea.estado === "COMPLETADA");
+    } else if (filtroContacto === "noContactados") {
+      filas = filas.filter((f) => f.tarea.estado !== "COMPLETADA");
+    }
     if (ordenIngresos) {
       const dir = ordenIngresos === "asc" ? 1 : -1;
       filas = [...filas].sort(
@@ -76,12 +84,25 @@ function TareasRenovacionPanel() {
       );
     }
     return filas;
-  }, [data, periodicidad, ordenIngresos]);
+  }, [data, periodicidad, filtroContacto, ordenIngresos]);
 
   async function handleContactar(tarea: Tarea) {
     setMarcandoId(tarea.id);
     try {
       await updateTarea(tarea.id, { estado: "COMPLETADA" });
+      refetch();
+    } finally {
+      setMarcandoId(null);
+    }
+  }
+
+  // Por si se marco "Contactado" por error, o hay que volver a contactar a
+  // alguien que ya se habia dado por hecho — vuelve al estado inicial, igual
+  // que una tarea de renovacion recien generada.
+  async function handleRevertirContacto(tarea: Tarea) {
+    setMarcandoId(tarea.id);
+    try {
+      await updateTarea(tarea.id, { estado: "PENDIENTE" });
       refetch();
     } finally {
       setMarcandoId(null);
@@ -143,7 +164,19 @@ function TareasRenovacionPanel() {
       label: "",
       align: "center",
       render: (f) =>
-        f.tarea.estado === "COMPLETADA" || f.tarea.estado === "CANCELADA" ? (
+        f.tarea.estado === "COMPLETADA" ? (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={marcandoId === f.tarea.id}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleRevertirContacto(f.tarea);
+            }}
+          >
+            {marcandoId === f.tarea.id ? "..." : "Marcar no contactado"}
+          </button>
+        ) : f.tarea.estado === "CANCELADA" ? (
           <span className="muted">—</span>
         ) : (
           <button
@@ -191,6 +224,29 @@ function TareasRenovacionPanel() {
             {p.label}
           </button>
         ))}
+      </div>
+      <div className="modulo-clientes-periodo" style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className={filtroContacto === "todos" ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => setFiltroContacto("todos")}
+        >
+          Todos
+        </button>
+        <button
+          type="button"
+          className={filtroContacto === "noContactados" ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => setFiltroContacto("noContactados")}
+        >
+          No contactados
+        </button>
+        <button
+          type="button"
+          className={filtroContacto === "contactados" ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => setFiltroContacto("contactados")}
+        >
+          Contactados
+        </button>
       </div>
       {error && <p className="error-text">{error}</p>}
       <DataTable

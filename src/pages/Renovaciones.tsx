@@ -7,8 +7,10 @@ import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { KpiCard } from "../components/ui/KpiCard";
 import { SegmentoPill } from "../components/ui/StatusPill";
+import { ExportButtons } from "../components/ui/ExportButtons";
 import { useClientes } from "../hooks/useClientes";
 import type { PagoNormalizado, Periodicidad, PostVentaCliente } from "../types/postventaCliente";
+import { exportarExcel, exportarPdf, type ExportColumn } from "../utils/exportTable";
 import { formatCurrency, formatNumber } from "../utils/format";
 
 // Se trae todo de una — no es paginado como Clientes, el objetivo es
@@ -355,6 +357,27 @@ function exportarClientesCsv(
   URL.revokeObjectURL(url);
 }
 
+function columnasExportResumenMes(
+  tipo: "yaRenovaron" | "faltanRenovar"
+): ExportColumn<ClienteRenovacionMes>[] {
+  return [
+    { header: "Cliente", value: (r) => r.cliente.nombreCliente },
+    { header: "RUC/DNI", value: (r) => r.cliente.numeroDocumentoCliente },
+    { header: "Periodicidad", value: (r) => PERIODICIDAD_LABEL[r.periodicidad] },
+    { header: "Plan", value: (r) => r.cliente.planActual.nombre },
+    {
+      header: tipo === "yaRenovaron" ? "Fecha de pago" : "Vence / vencido desde",
+      value: (r) => (r.fecha ? new Date(r.fecha).toLocaleDateString("es-PE") : ""),
+    },
+    { header: "Monto", value: (r) => r.monto },
+    {
+      header: "Estado",
+      value: (r) => (tipo === "yaRenovaron" ? "Ya renovó" : esProblema(r.cliente) ? "Vencido" : "Pendiente"),
+    },
+    { header: "Ejecutivo", value: (r) => r.cliente.ordenVigente.ejecutivo ?? "" },
+  ];
+}
+
 function columnasClientesResumenMes(
   tipo: "yaRenovaron" | "faltanRenovar",
   onAbrirAcciones: (numeroDocumentoCliente: string) => void
@@ -451,6 +474,17 @@ function proximaBadge(dias: number | null) {
   return <Badge tone="neutral">{dias} día(s)</Badge>;
 }
 
+// "desc" (default, igual que antes) = antiguos primero (mas dias vencido
+// arriba). "asc" = recientes primero. Sin dato (diasVencido null) siempre al
+// final, en cualquiera de los dos sentidos — no tiene sentido intercalarlo
+// entre fechas reales.
+function compararVencidos(a: PostVentaCliente, b: PostVentaCliente, dir: "asc" | "desc"): number {
+  if (a.diasVencido === null && b.diasVencido === null) return 0;
+  if (a.diasVencido === null) return 1;
+  if (b.diasVencido === null) return -1;
+  return dir === "desc" ? b.diasVencido - a.diasVencido : a.diasVencido - b.diasVencido;
+}
+
 function vencidaBadge(dias: number | null) {
   if (dias === null) return <span className="muted">No determinado</span>;
   return <Badge tone="critical">{dias} día(s)</Badge>;
@@ -511,12 +545,28 @@ function columnasProximas(
   ];
 }
 
+const columnasExportProximas: ExportColumn<PostVentaCliente>[] = [
+  { header: "Cliente", value: (c) => c.nombreCliente },
+  { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
+  { header: "Plan", value: (c) => c.planActual.nombre },
+  { header: "Periodicidad", value: (c) => c.planActual.periodicidad },
+  { header: "Vence en (días)", value: (c) => c.diasParaRenovacion ?? "" },
+  {
+    header: "Fecha estimada",
+    value: (c) => (c.proximaRenovacion ? new Date(c.proximaRenovacion).toLocaleDateString("es-PE") : ""),
+  },
+  { header: "Segmento", value: (c) => c.segmentoEfectivo ?? "" },
+  { header: "Pago", value: (c) => (yaPagoProximoCiclo(c) ? "Ya pagó" : "Pendiente") },
+  { header: "Ingresos mensuales (real)", value: (c) => c.ingresoMensualReal ?? "" },
+  { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
+];
+
 function columnasVencidas(
   onAbrirAcciones: (numeroDocumentoCliente: string) => void
 ): DataTableColumn<PostVentaCliente>[] {
   return [
   columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
-  { key: "vencido", label: "Vencido hace", render: (c) => vencidaBadge(c.diasVencido) },
+  { key: "vencido", label: "Vencido hace", sortable: true, render: (c) => vencidaBadge(c.diasVencido) },
   {
     key: "cliente",
     label: "Cliente",
@@ -564,13 +614,43 @@ function columnasVencidas(
   ];
 }
 
+const columnasExportVencidas: ExportColumn<PostVentaCliente>[] = [
+  { header: "Cliente", value: (c) => c.nombreCliente },
+  { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
+  { header: "Plan", value: (c) => c.planActual.nombre },
+  { header: "Vencido hace (días)", value: (c) => c.diasVencido ?? "" },
+  {
+    header: "Vencido desde",
+    value: (c) => (c.vencidoDesde ? new Date(c.vencidoDesde).toLocaleDateString("es-PE") : ""),
+  },
+  { header: "Estado", value: (c) => c.ordenVigente.nEstadoApiWorking },
+  { header: "Ingresos mensuales (real)", value: (c) => c.ingresoMensualReal ?? "" },
+  { header: "Deuda actual", value: (c) => c.deudaTotal },
+  { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
+];
+
+function columnasExportCobranzaMensual(mesSeleccionado: MesInfo): ExportColumn<PostVentaCliente>[] {
+  return [
+    { header: "Cliente", value: (c) => c.nombreCliente },
+    { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
+    {
+      header: mesSeleccionado.label,
+      value: (c) => resumenMesCliente(c, mesSeleccionado.anio, mesSeleccionado.mes).facturado,
+    },
+    { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
+  ];
+}
+
 export function RenovacionesPage() {
   const [vista, setVista] = useState<Vista>("proximas");
   const [alcance, setAlcance] = useState<Alcance>("esteMes");
   const [periodicidadFiltro, setPeriodicidadFiltro] = useState<PeriodicidadFiltro>("");
-  // mesFuturoOffset: 0 = mes actual, 1 = +1 mes, etc. — nunca negativo, esto
-  // es para mirar hacia adelante (ej. "que vence en setiembre"), lo de atras
-  // ya lo cubren "Ya vencidas" y "Cobranza Mensual".
+  // mesFuturoOffset: 0 = mes actual, 1 = +1 mes, -1 = mes pasado, etc. — a
+  // diferencia de "Ya vencidas" (que solo mira vencidos historicos sin
+  // resolver, no por mes) y "Cobranza Mensual" (que solo cubre clientes
+  // Mensual), este panel es el unico que da la foto completa "quien ya
+  // renovo / quien falto" de las 4 periodicidades para un mes cerrado —
+  // util para revisar como cerro el mes pasado, no solo mirar adelante.
   const [mesFuturoOffset, setMesFuturoOffset] = useState(0);
   const [panelAbierto, setPanelAbierto] = useState(true);
   const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
@@ -645,10 +725,10 @@ export function RenovacionesPage() {
     return base;
   }, [alcance, sanas, ahora, periodicidadFiltro, mesFuturo]);
 
+  const [ordenVencidas, setOrdenVencidas] = useState<"asc" | "desc">("desc");
   const filasVencidas = useMemo(
-    () =>
-      [...problema].sort((a, b) => (b.diasVencido ?? -Infinity) - (a.diasVencido ?? -Infinity)),
-    [problema]
+    () => [...problema].sort((a, b) => compararVencidos(a, b, ordenVencidas)),
+    [problema, ordenVencidas]
   );
 
   // Cobranza Mensual: solo clientes Mensual, sin importar si estan "sanos" o
@@ -701,6 +781,34 @@ export function RenovacionesPage() {
     [mesSeleccionado, ahora, esMesActual]
   );
 
+  // Datos a exportar segun la pestaña activa (Proxima/Vencidas/Cobranza
+  // Mensual) — las 3 comparten PostVentaCliente como fila, asi que un solo
+  // botonera de export sirve para las 3 sin repetir el bloque de botones.
+  const exportVistaActual = useMemo(() => {
+    if (vista === "vencidas") {
+      return {
+        filas: filasVencidas,
+        columnas: columnasExportVencidas,
+        nombreArchivo: "renovaciones_ya_vencidas",
+        titulo: "Renovaciones — Ya vencidas",
+      };
+    }
+    if (vista === "cobranzaMensual") {
+      return {
+        filas: mensuales,
+        columnas: columnasExportCobranzaMensual(mesSeleccionado),
+        nombreArchivo: `cobranza_mensual_${mesSeleccionado.label.replace(/\s+/g, "_")}`,
+        titulo: `Cobranza Mensual — ${mesSeleccionado.label}`,
+      };
+    }
+    return {
+      filas: filasProximas,
+      columnas: columnasExportProximas,
+      nombreArchivo: "renovaciones_proximas_a_vencer",
+      titulo: "Renovaciones — Próximas a vencer",
+    };
+  }, [vista, filasProximas, filasVencidas, mensuales, mesSeleccionado]);
+
   return (
     <div>
       <div className="page-header">
@@ -745,8 +853,7 @@ export function RenovacionesPage() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => setMesFuturoOffset((o) => Math.max(0, o - 1))}
-              disabled={mesFuturoOffset === 0}
+              onClick={() => setMesFuturoOffset((o) => o - 1)}
             >
               ← Mes anterior
             </button>
@@ -835,8 +942,26 @@ export function RenovacionesPage() {
                 onClick={() => exportarClientesCsv(clientesResumenMes, vistaMesTipo, mesFuturo.label)}
                 disabled={clientesResumenMes.length === 0}
               >
-                Descargar CSV
+                CSV
               </button>
+              <ExportButtons
+                disabled={clientesResumenMes.length === 0}
+                onExcel={() =>
+                  exportarExcel(
+                    `renovaciones_${vistaMesTipo}_${mesFuturo.label.replace(/\s+/g, "_")}`,
+                    columnasExportResumenMes(vistaMesTipo),
+                    clientesResumenMes
+                  )
+                }
+                onPdf={() =>
+                  exportarPdf(
+                    `renovaciones_${vistaMesTipo}_${mesFuturo.label.replace(/\s+/g, "_")}`,
+                    `Renovaciones — ${vistaMesTipo === "yaRenovaron" ? "Ya renovaron" : "Faltan renovar"} — ${mesFuturo.label}`,
+                    columnasExportResumenMes(vistaMesTipo),
+                    clientesResumenMes
+                  )
+                }
+              />
             </div>
           </div>
           <DataTable
@@ -1020,6 +1145,23 @@ export function RenovacionesPage() {
         </p>
       )}
 
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        <ExportButtons
+          disabled={exportVistaActual.filas.length === 0}
+          onExcel={() =>
+            exportarExcel(exportVistaActual.nombreArchivo, exportVistaActual.columnas, exportVistaActual.filas)
+          }
+          onPdf={() =>
+            exportarPdf(
+              exportVistaActual.nombreArchivo,
+              exportVistaActual.titulo,
+              exportVistaActual.columnas,
+              exportVistaActual.filas
+            )
+          }
+        />
+      </div>
+
       <div className="card">
         {vista === "proximas" && (
           <DataTable
@@ -1036,6 +1178,9 @@ export function RenovacionesPage() {
             rows={filasVencidas}
             rowKey={(c) => c.numeroDocumentoCliente}
             loading={loading}
+            sortBy="vencido"
+            sortDir={ordenVencidas}
+            onSortChange={() => setOrdenVencidas((o) => (o === "desc" ? "asc" : "desc"))}
             emptyMessage="No hay clientes vencidos — toda la cartera viene al día."
           />
         )}
