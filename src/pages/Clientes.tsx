@@ -19,6 +19,7 @@ import { getClienteIntereses } from "../services/intereses";
 import { getReunionesCliente } from "../services/reuniones";
 import { createSavedView } from "../services/savedViews";
 import { useClientes } from "../hooks/useClientes";
+import { useOportunidades } from "../hooks/useOportunidades";
 import { useSavedViews } from "../hooks/useSavedViews";
 import type {
   EstadoPostVenta,
@@ -49,7 +50,13 @@ const SORT_FIELD_BY_COLUMN: Record<string, string> = {
   actividad: "diasSinActividad",
 };
 
-const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
+// Antes era un array estatico — pasa a funcion porque la columna
+// "oportunidad" necesita el set de clientes con oportunidad activa
+// (viene de otro fetch, useOportunidades, no de PostVentaCliente).
+function buildAllColumns(
+  clientesConOportunidad: Set<string>
+): DataTableColumn<PostVentaCliente>[] {
+  return [
   {
     key: "estado",
     label: "Estado",
@@ -196,19 +203,24 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
   },
   {
     key: "deuda",
-    label: "Deuda",
+    label: "Deuda / días vencidos",
     sortable: true,
     align: "right",
     render: (c) => (
-      <span
-        style={
-          c.deudaTotal > 0
-            ? { color: "var(--color-critical)", fontWeight: 600 }
-            : undefined
-        }
-      >
-        {formatCurrency(c.deudaTotal)}
-      </span>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        <span
+          style={
+            c.deudaTotal > 0
+              ? { color: "var(--color-critical)", fontWeight: 600 }
+              : undefined
+          }
+        >
+          {formatCurrency(c.deudaTotal)}
+        </span>
+        {c.deudaTotal > 0 && c.diasVencido !== null && (
+          <Badge tone="critical">{c.diasVencido} día(s) vencido</Badge>
+        )}
+      </div>
     ),
   },
   {
@@ -226,16 +238,29 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
   },
   {
     key: "renovacion",
-    label: "Renovación",
+    label: "Próximo cobro esperado",
     sortable: true,
     align: "right",
     render: (c) => {
-      if (c.diasParaRenovacion === null) return <span className="muted">—</span>;
-      if (c.diasParaRenovacion < 0) return <Badge tone="critical">Vencida</Badge>;
+      if (c.diasParaRenovacion === null || !c.proximaRenovacion) {
+        return <span className="muted">—</span>;
+      }
+      const fecha = new Date(c.proximaRenovacion).toLocaleDateString("es-PE");
+      const badge =
+        c.diasParaRenovacion < 0 ? (
+          <Badge tone="critical">Vencida</Badge>
+        ) : (
+          <Badge tone={c.diasParaRenovacion <= 7 ? "warning" : "neutral"}>
+            {c.diasParaRenovacion} día(s)
+          </Badge>
+        );
       return (
-        <Badge tone={c.diasParaRenovacion <= 7 ? "warning" : "neutral"}>
-          {c.diasParaRenovacion} día(s)
-        </Badge>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+          {badge}
+          <span className="muted" style={{ fontSize: "0.78rem" }}>
+            {fecha}
+          </span>
+        </div>
       );
     },
   },
@@ -277,9 +302,53 @@ const ALL_COLUMNS: DataTableColumn<PostVentaCliente>[] = [
       return <Badge tone={tone}>{total}</Badge>;
     },
   },
-];
+  {
+    // Solo cubre los 3 tipos de incidencia con señal precalculada en el
+    // dataset (altaPendiente/certificadoPorVencer/certificadoVenceHoy) — el
+    // resto de incidencias de APIWorking se consultan bajo demanda desde la
+    // ficha del cliente (ver Especificaciones Postventa v2), no hay un
+    // conteo global disponible todavia sin el endpoint agregador de Fase 2.
+    key: "incidencias",
+    label: "Incidencias",
+    align: "center",
+    render: (c) => {
+      const senales: string[] = [];
+      if (c.certificadoVenceHoy) senales.push("Certificado vence hoy");
+      else if (c.certificadoPorVencer) senales.push("Certificado por vencer");
+      if (c.altaPendiente) senales.push("Alta pendiente");
+      if (senales.length === 0) return <span className="muted">Sin señales detectadas</span>;
+      const tone = c.certificadoVenceHoy || c.altaPendiente ? "critical" : "warning";
+      return <Badge tone={tone}>⚠ {senales.join(" · ")}</Badge>;
+    },
+  },
+  {
+    key: "tareas",
+    label: "Tareas asignadas",
+    align: "center",
+    render: (c) => {
+      const abiertas = c.metadata.tareasAbiertasCount;
+      if (abiertas === 0) return <span className="muted">—</span>;
+      return <Badge tone="info">{abiertas}</Badge>;
+    },
+  },
+  {
+    key: "oportunidad",
+    label: "Oportunidad",
+    align: "center",
+    render: (c) =>
+      clientesConOportunidad.has(c.numeroDocumentoCliente) ? (
+        <Badge tone="success">🎯 Sí</Badge>
+      ) : (
+        <span className="muted">—</span>
+      ),
+  },
+  ];
+}
 
-const COLUMN_OPTIONS: ColumnOption[] = ALL_COLUMNS.map((c) => ({ key: c.key, label: c.label }));
+const COLUMN_OPTIONS: ColumnOption[] = buildAllColumns(new Set()).map((c) => ({
+  key: c.key,
+  label: c.label,
+}));
 
 // Set inicial minimo — con los 21 campos disponibles, mostrar todo de
 // entrada satura el cuadro. El resto (segmento, rubro, alertas, etc.) sigue
@@ -292,6 +361,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   "telefono",
   "plan",
   "deuda",
+  "incidencias",
   "ingresosMensuales",
   "renovacion",
   "ejecutivo",
@@ -476,24 +546,44 @@ export function ClientesPage() {
   );
   const { data, loading, error } = useClientes(queryParams);
   const { data: savedViews, refetch: refetchSavedViews } = useSavedViews(SCREEN);
+  // Reutiliza el motor de oportunidades ya expuesto en /oportunidades (mismo
+  // que consume la pagina Oportunidades) solo para saber que clientes tienen
+  // al menos una señal activa — no se vuelve a evaluar nada aca.
+  const { data: oportunidadesData } = useOportunidades();
+  const clientesConOportunidad = useMemo(
+    () => new Set((oportunidadesData?.data ?? []).map((o) => o.cliente)),
+    [oportunidadesData]
+  );
+  const allColumns = useMemo(
+    () => buildAllColumns(clientesConOportunidad),
+    [clientesConOportunidad]
+  );
 
+  // <tr> nunca es clicable en esta tabla: cada fila expone esta acción
+  // explícita ("Ver ficha") ademas del enlace sobre el nombre del cliente en
+  // la columna "cliente" — ambos son focables y accionables por teclado.
   const accionesColumn: DataTableColumn<PostVentaCliente> = {
     key: "acciones",
     label: "Acciones",
     render: (c) => (
-      <button
-        type="button"
-        className="btn btn-ghost"
-        onClick={(event) => {
-          event.stopPropagation();
-          handleAbrirAccion(c);
-        }}
-      >
-        📅 Agendar / 🎯 Interés
-      </button>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Link className="btn btn-secondary" to={`/clientes/${c.numeroDocumentoCliente}`}>
+          Ver ficha
+        </Link>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={(event) => {
+            event.stopPropagation();
+            handleAbrirAccion(c);
+          }}
+        >
+          📅 Agendar / 🎯 Interés
+        </button>
+      </div>
     ),
   };
-  const columns = [accionesColumn, ...ALL_COLUMNS.filter((c) => visibleColumns.includes(c.key))];
+  const columns = [accionesColumn, ...allColumns.filter((c) => visibleColumns.includes(c.key))];
 
   function updateFilter<K extends keyof FiltersState>(key: K, value: FiltersState[K]) {
     setPage(1);
