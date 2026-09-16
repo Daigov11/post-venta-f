@@ -506,6 +506,20 @@ export interface Incidencia {
   automatico: boolean;
 }
 
+export interface Capacitacion {
+  idCapacitacion: number;
+  tipo: string;
+  estado: "CANCELADA" | "CAPACITADO" | "PENDIENTE";
+  numeroDocumentoCliente: string | null;
+  numeroOs: string | null;
+  fecha: string | null;
+  fechaFinal: string | null;
+  capacitador: string | null;
+  agendador: string | null;
+  vendedor: string | null;
+  modalidad: string | null;
+}
+
 export interface IncidenciasResponse {
   data: Incidencia[];
   total: number;

@@ -17,12 +17,14 @@ import { useAuth } from "../context/AuthContext";
 import { useCliente } from "../hooks/useCliente";
 import { useSeguimientos } from "../hooks/useSeguimientos";
 import { uploadAdjuntos } from "../services/adjuntos";
+import { getCapacitaciones } from "../services/capacitaciones";
 import { refreshSystemUsersOne, updateClienteMetadata } from "../services/clientes";
 import { getHistorialSeguimiento } from "../services/historial";
 import { getIncidencias } from "../services/incidencias";
 import { createNota } from "../services/notas";
 import { createSeguimiento, createTarea, updateTarea } from "../services/tareas";
 import type {
+  Capacitacion,
   EstadoPostVenta,
   EstadoTarea,
   HistorialSeguimientoEvento,
@@ -178,6 +180,22 @@ export function ClienteFichaPage() {
   const [filtroIncidencias, setFiltroIncidencias] = useState<"todas" | "abiertas" | "resueltas">(
     "todas"
   );
+
+  // A diferencia de incidencias (llamada en vivo a APIWorking, cara, se pide
+  // solo si el usuario hace clic), capacitaciones ya viene precalculado por
+  // el sync diario — es una consulta local barata, se carga sola.
+  const [capacitaciones, setCapacitaciones] = useState<Capacitacion[] | null>(null);
+  const [loadingCapacitaciones, setLoadingCapacitaciones] = useState(false);
+
+  useEffect(() => {
+    setCapacitaciones(null);
+    if (!numeroDocumentoCliente) return;
+    setLoadingCapacitaciones(true);
+    getCapacitaciones(numeroDocumentoCliente)
+      .then(setCapacitaciones)
+      .catch(() => setCapacitaciones([]))
+      .finally(() => setLoadingCapacitaciones(false));
+  }, [numeroDocumentoCliente]);
 
   const [usuarioCopiado, setUsuarioCopiado] = useState<string | null>(null);
   async function handleCopiar(texto: string, marcador: string) {
@@ -1142,6 +1160,52 @@ export function ClienteFichaPage() {
                     Asignado a {inc.asignadoA || "—"}
                     {inc.aCargo && inc.aCargo !== "SIN ASIGNAR" && ` · A cargo de ${inc.aCargo}`}
                     {inc.reportadoPorCliente && " · Reportada por el cliente"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="card ficha-section ficha-full-width">
+          <h2>Capacitaciones{capacitaciones ? ` (${capacitaciones.length})` : ""}</h2>
+          <p className="muted">
+            Capacitaciones y reforzamientos dictados a este cliente en APIWorking.
+          </p>
+          {loadingCapacitaciones && <Skeleton height={40} />}
+          {!loadingCapacitaciones && capacitaciones !== null && capacitaciones.length === 0 && (
+            <EmptyState title="Sin capacitaciones registradas" />
+          )}
+          {!loadingCapacitaciones && capacitaciones !== null && capacitaciones.length > 0 && (
+            <div className="ficha-field-list">
+              {capacitaciones.map((cap) => (
+                <div key={cap.idCapacitacion} className="historial-seguimiento-item">
+                  <div className="historial-seguimiento-item-header">
+                    <Badge
+                      tone={
+                        cap.estado === "CAPACITADO"
+                          ? "success"
+                          : cap.estado === "CANCELADA"
+                            ? "critical"
+                            : "warning"
+                      }
+                    >
+                      {cap.estado === "CAPACITADO"
+                        ? "Capacitado"
+                        : cap.estado === "CANCELADA"
+                          ? "Cancelada"
+                          : "Pendiente"}
+                    </Badge>
+                    {cap.tipo && <Badge tone="neutral">{cap.tipo}</Badge>}
+                    <span className="historial-seguimiento-item-fecha">
+                      {cap.fecha ? new Date(cap.fecha).toLocaleString("es-PE") : "Sin fecha"}
+                    </span>
+                  </div>
+                  <div className="historial-seguimiento-item-persona">
+                    {cap.capacitador && `Capacitador: ${cap.capacitador}`}
+                    {cap.modalidad && ` · Modalidad: ${cap.modalidad}`}
+                    {cap.agendador && ` · Agendador: ${cap.agendador}`}
+                    {cap.vendedor && ` · Vendedor: ${cap.vendedor}`}
                   </div>
                 </div>
               ))}
