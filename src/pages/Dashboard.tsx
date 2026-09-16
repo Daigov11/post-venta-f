@@ -1,19 +1,30 @@
 import { useState } from "react";
-import { CategoryBarChart } from "../components/charts/CategoryBarChart";
-import { EstadoBarChart } from "../components/charts/EstadoBarChart";
-import { ChartCard } from "../components/ui/ChartCard";
-import { EmptyState } from "../components/ui/EmptyState";
+import { Link } from "react-router-dom";
 import { KpiCard } from "../components/ui/KpiCard";
 import { Skeleton } from "../components/ui/Skeleton";
 import { useDashboardKpis } from "../hooks/useDashboardKpis";
+import { useTareas } from "../hooks/useTareas";
 import { refreshPostVentaCache } from "../services/dashboard";
 import { formatCurrency, formatNumber } from "../utils/format";
 import "./Dashboard.css";
 
-const TOP_N = 8;
+// Mismo criterio de "hoy" que el resto del panel (backend corre con
+// TZ=America/Lima, ver backend/package.json) — comparacion por
+// year/month/day locales, no por substring ISO (evita corrimientos de huso).
+function esHoyOAntes(fechaIso: string | null): boolean {
+  if (!fechaIso) return false;
+  const hoy = new Date();
+  hoy.setHours(23, 59, 59, 999);
+  return new Date(fechaIso) <= hoy;
+}
 
 export function DashboardPage() {
   const { data, loading, error, refetch } = useDashboardKpis();
+  // Sin filtro de "hoy" en el backend (no existe ese parametro en GET
+  // /tareas) — se trae todo lo no cerrado y se acota en el cliente, mismo
+  // patron que ya usan Renovaciones.tsx/Tareas.tsx para sus propios calculos.
+  const { data: tareas, loading: loadingTareas, error: errorTareas } = useTareas({});
+
   const [refreshing, setRefreshing] = useState(false);
 
   async function handleRefresh() {
@@ -26,13 +37,18 @@ export function DashboardPage() {
     }
   }
 
+  const tareasDeHoy = (tareas ?? []).filter(
+    (t) => t.estado !== "CANCELADA" && esHoyOAntes(t.fechaVencimiento)
+  );
+  const tareasDeHoyCompletadas = tareasDeHoy.filter((t) => t.estado === "COMPLETADA").length;
+
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1>Dashboard</h1>
+          <h1>Panel principal</h1>
           <div className="page-header-subtitle">
-            ¿Qué clientes necesitan atención y por qué?
+            ¿A quién hay que atender hoy y por qué?
             {data && (
               <span className="dashboard-updated">
                 {" "}
@@ -51,11 +67,18 @@ export function DashboardPage() {
         </button>
       </div>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <div className="dashboard-error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn btn-ghost" onClick={refetch}>
+            Reintentar
+          </button>
+        </div>
+      )}
 
       {loading && !data && (
         <div className="kpi-grid">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div className="card kpi-card" key={i}>
               <Skeleton height={12} width="60%" />
               <Skeleton height={28} width="40%" />
@@ -66,87 +89,147 @@ export function DashboardPage() {
 
       {data && (
         <>
-          <div className="kpi-grid">
-            <KpiCard label="Clientes" value={formatNumber(data.totalClientes)} />
-            <KpiCard label="Órdenes de servicio" value={formatNumber(data.totalOs)} />
-            <KpiCard
-              label="Deuda total"
-              value={formatCurrency(data.deudaTotal)}
-              tone={data.deudaTotal > 0 ? "critical" : undefined}
-            />
-            <KpiCard
-              label="Clientes con deuda"
-              value={formatNumber(data.clientesConDeuda)}
-              hint={`${formatNumber(data.totalClientes - data.clientesConDeuda)} sin deuda`}
-            />
-            <KpiCard
-              label="Clientes sin equipo"
-              value={formatNumber(data.clientesSinEquipo)}
-              hint={`${formatNumber(data.totalClientes - data.clientesSinEquipo)} con equipo`}
-              tone="warning"
-            />
-            <KpiCard
-              label="Documentación incompleta"
-              value={formatNumber(data.clientesDocumentacionIncompleta)}
-              tone="warning"
-            />
-            <KpiCard
-              label="Comprobantes históricos"
-              value={formatNumber(data.comprobantesHistoricoTotal)}
-            />
-          </div>
+          <section className="dashboard-section" aria-labelledby="dash-prioridades">
+            <h2 id="dash-prioridades">Prioridades de hoy</h2>
+            <div className="kpi-grid">
+              <KpiCard
+                label="Alertas críticas"
+                value={formatNumber(data.alertasPorNivel.CRITICAL)}
+                tone={data.alertasPorNivel.CRITICAL > 0 ? "critical" : "success"}
+                hint="Ver detalle en Alertas"
+              />
+              <KpiCard
+                label="Incidencias sin resolver"
+                value="—"
+                tone="future"
+                hint="Próximamente · Fase 2 — depende del endpoint agregador de incidencias en APIWorking"
+              />
+              <KpiCard
+                label="Renovaciones próximas"
+                value={formatNumber(data.renovacionesProximas.count)}
+                tone={data.renovacionesProximas.count > 0 ? "warning" : "success"}
+                hint={`${formatCurrency(data.renovacionesProximas.monto)} en juego este ciclo`}
+              />
+            </div>
+            <nav className="dashboard-quick-links" aria-label="Accesos directos a colas de trabajo">
+              <Link className="btn btn-secondary" to="/alertas">
+                Ver alertas
+              </Link>
+              <Link className="btn btn-secondary" to="/clientes">
+                Ver cartera
+              </Link>
+              <Link className="btn btn-secondary" to="/tareas">
+                Ver tareas
+              </Link>
+            </nav>
+          </section>
 
-          <div className="chart-grid">
-            <ChartCard title="Distribución por estado post venta">
-              <EstadoBarChart data={data.clientesPorEstado} />
-            </ChartCard>
+          <section className="dashboard-section" aria-labelledby="dash-cobranza">
+            <h2 id="dash-cobranza">Cobranza del mes</h2>
+            <div className="kpi-grid">
+              <KpiCard label="Total esperado del mes" value={formatCurrency(data.totalEsperadoMes)} />
+              <KpiCard
+                label="Estimado por recaudar hoy"
+                value={formatCurrency(data.estimadoRecaudarHoy)}
+              />
+              <KpiCard
+                label="Cobrado este mes"
+                value={formatCurrency(data.totalCobradoMes)}
+                tone="success"
+              />
+              <KpiCard
+                label="Deuda total"
+                value={formatCurrency(data.deudaTotal)}
+                tone={data.deudaTotal > 0 ? "critical" : undefined}
+                hint={`1 mes: ${formatCurrency(data.deudaPorAntiguedad.unMes)} · 2 meses: ${formatCurrency(
+                  data.deudaPorAntiguedad.dosMeses
+                )} · 3+ meses: ${formatCurrency(data.deudaPorAntiguedad.tresMasMeses)}`}
+              />
+            </div>
+          </section>
 
-            <ChartCard title="Distribución por estado (APIWorking)" subtitle="Top 8">
-              {data.clientesPorEstadoApiWorking.length === 0 ? (
-                <EmptyState />
-              ) : (
-                <CategoryBarChart
-                  data={data.clientesPorEstadoApiWorking
-                    .slice(0, TOP_N)
-                    .map((row) => ({ label: row.estado, count: row.count }))}
-                />
-              )}
-            </ChartCard>
+          <section className="dashboard-section" aria-labelledby="dash-tareas">
+            <h2 id="dash-tareas">Tareas y misiones de hoy</h2>
+            {errorTareas && <p className="error-text">{errorTareas}</p>}
+            <div className="kpi-grid">
+              <KpiCard
+                label="Progreso de hoy"
+                value={loadingTareas ? "—" : `${tareasDeHoyCompletadas}/${tareasDeHoy.length}`}
+                hint="Vencimiento hoy o antes, sin cancelar — ver detalle en Tareas"
+              />
+              <KpiCard
+                label="Resumen de conversiones del día"
+                value="—"
+                tone="future"
+                hint="Próximamente · Fase 3 — depende del módulo Resultados y cierre diario"
+              />
+            </div>
+          </section>
 
-            <ChartCard title="Distribución por tipo de plan" subtitle="Top 8">
-              {data.topPlanes.length === 0 ? (
-                <EmptyState />
-              ) : (
-                <CategoryBarChart
-                  data={data.topPlanes.map((row) => ({ label: row.plan, count: row.count }))}
-                />
-              )}
-            </ChartCard>
+          <section className="dashboard-section" aria-labelledby="dash-cartera">
+            <h2 id="dash-cartera">Cartera</h2>
+            <div className="kpi-grid">
+              <KpiCard label="Clientes" value={formatNumber(data.totalClientes)} />
+              <KpiCard label="Órdenes de servicio" value={formatNumber(data.totalOs)} />
+              <KpiCard
+                label="Clientes con deuda"
+                value={formatNumber(data.clientesConDeuda)}
+                hint={`${formatNumber(data.totalClientes - data.clientesConDeuda)} sin deuda`}
+              />
+              <KpiCard
+                label="Clientes sin equipo"
+                value={formatNumber(data.clientesSinEquipo)}
+                hint={`${formatNumber(data.totalClientes - data.clientesSinEquipo)} con equipo`}
+                tone="warning"
+              />
+              <KpiCard
+                label="Documentación incompleta"
+                value={formatNumber(data.clientesDocumentacionIncompleta)}
+                tone="warning"
+              />
+              <KpiCard
+                label="Comprobantes históricos"
+                value={formatNumber(data.comprobantesHistoricoTotal)}
+              />
+            </div>
+          </section>
 
-            <ChartCard title="Distribución por ejecutivo" subtitle="Top 8">
-              {data.clientesPorEjecutivo.length === 0 ? (
-                <EmptyState />
-              ) : (
-                <CategoryBarChart
-                  data={data.clientesPorEjecutivo
-                    .slice(0, TOP_N)
-                    .map((row) => ({ label: row.ejecutivo, count: row.count }))}
-                />
-              )}
-            </ChartCard>
-
-            <ChartCard title="Distribución geográfica" subtitle="Top 8 departamentos">
-              {data.distribucionDepartamentos.length === 0 ? (
-                <EmptyState />
-              ) : (
-                <CategoryBarChart
-                  data={data.distribucionDepartamentos
-                    .slice(0, TOP_N)
-                    .map((row) => ({ label: row.departamento, count: row.count }))}
-                />
-              )}
-            </ChartCard>
-          </div>
+          <section className="dashboard-section" aria-labelledby="dash-senales">
+            <h2 id="dash-senales">Señales operativas</h2>
+            <div className="kpi-grid">
+              <KpiCard label="Clientes con APILoyalty" value={formatNumber(data.clientesLoyalty)} />
+              <KpiCard
+                label="Clientes Google"
+                value="—"
+                tone="pending"
+                hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
+              />
+              <KpiCard
+                label="Clientes con Pago QR"
+                value="—"
+                tone="pending"
+                hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
+              />
+              <KpiCard
+                label="Proyectado anual ya cobrado"
+                value="—"
+                tone="pending"
+                hint="Fuente pendiente de validación"
+              />
+              <KpiCard
+                label="Proyectado mensual ya cobrado"
+                value="—"
+                tone="pending"
+                hint="Fuente pendiente de validación"
+              />
+              <KpiCard
+                label="Proyectado semestral ya cobrado"
+                value="—"
+                tone="pending"
+                hint="Fuente pendiente de validación"
+              />
+            </div>
+          </section>
         </>
       )}
     </div>

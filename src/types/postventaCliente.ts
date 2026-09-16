@@ -472,6 +472,14 @@ export interface DashboardKpis {
   distribucionDepartamentos: { departamento: string; count: number }[];
   alertasPorNivel: { INFO: number; WARNING: number; CRITICAL: number };
   oportunidadesPorTipo: Record<string, number>;
+  // KPIs financiero-operativos del Panel principal (Fase 1 Postventa) — ver
+  // calcularKpisPanel en el backend, misma formula que Renovaciones.tsx.
+  totalEsperadoMes: number;
+  estimadoRecaudarHoy: number;
+  totalCobradoMes: number;
+  deudaPorAntiguedad: { unMes: number; dosMeses: number; tresMasMeses: number };
+  clientesLoyalty: number;
+  renovacionesProximas: { count: number; monto: number };
 }
 
 // Historial de seguimiento (Administrativo/historial-seguimiento, origen=1 —

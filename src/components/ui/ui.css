@@ -34,13 +34,32 @@
   background: var(--color-primary-100);
   color: var(--color-primary-800);
 }
+.badge-local {
+  background: var(--color-local-bg);
+  color: var(--color-local);
+}
+.badge-pending {
+  background: var(--color-pending-bg);
+  color: var(--color-pending);
+  border: 1px dashed var(--color-pending);
+}
+.badge-future {
+  background: var(--color-future-bg);
+  color: var(--color-future);
+  border: 1px solid var(--color-future);
+}
 
-/* KpiCard */
+/* KpiCard — es un <dl>, resetear el margin por defecto del navegador */
 .kpi-card {
+  margin: 0;
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+.kpi-card-value,
+.kpi-card-label {
+  margin: 0;
 }
 .kpi-card-label {
   font-size: 0.78rem;
@@ -66,6 +85,18 @@
 }
 .kpi-card-success .kpi-card-value {
   color: var(--color-success);
+}
+.kpi-card-pending {
+  border: 1px dashed var(--color-pending);
+}
+.kpi-card-pending .kpi-card-value {
+  color: var(--color-pending);
+}
+.kpi-card-future {
+  border: 1px solid var(--color-future);
+}
+.kpi-card-future .kpi-card-value {
+  color: var(--color-future);
 }
 
 .kpi-grid {

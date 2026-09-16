@@ -32,6 +32,19 @@
   --color-info: #1d4ed8;
   --color-info-bg: #dbeafe;
 
+  /* Roles nuevos del rediseño Postventa Fase 1 (ver Handoff Postventa):
+     "local" distingue datos de la plataforma local de los de APIWorking
+     (--color-info se reutiliza para APIWorking); "pending"/"future" son
+     neutros/informativos a proposito — nunca deben leerse como alerta
+     (--color-warning) ni como error (--color-critical). Valores propuestos,
+     no corridos aun por scripts/validate_palette.js. */
+  --color-local: #6d28d9;
+  --color-local-bg: #ede9fe;
+  --color-pending: #4b5563;
+  --color-pending-bg: #eef0ee;
+  --color-future: #0f766e;
+  --color-future-bg: #e0f2f1;
+
   /* Charts: paleta de estado validada con scripts/validate_palette.js (skill
      dataviz) para marcas de grafico (barras) — separacion CVD verificada.
      No son los mismos hex que --color-warning/--color-critical de arriba,

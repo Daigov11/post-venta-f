@@ -2,3 +2,31 @@
   color: var(--color-text-muted);
   font-size: 0.8rem;
 }
+
+.dashboard-section {
+  margin-bottom: var(--space-6);
+}
+.dashboard-section h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-3) 0;
+  color: var(--color-text-secondary);
+}
+
+.dashboard-quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.dashboard-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--color-critical-bg);
+  color: var(--color-critical);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
