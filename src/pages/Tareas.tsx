@@ -6,10 +6,18 @@ import { ClienteCell } from "../components/ui/ClienteCell";
 import { CollapsibleCard } from "../components/ui/CollapsibleCard";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
+import { useClientes } from "../hooks/useClientes";
 import { useTareas } from "../hooks/useTareas";
 import { useTareasRenovacion } from "../hooks/useTareasRenovacion";
 import { updateTarea } from "../services/tareas";
-import type { EstadoTarea, Periodicidad, Tarea, TareaRenovacion } from "../types/postventaCliente";
+import type {
+  EstadoTarea,
+  Periodicidad,
+  PostVentaCliente,
+  PrioridadTarea,
+  Tarea,
+  TareaRenovacion,
+} from "../types/postventaCliente";
 import { formatCurrency } from "../utils/format";
 
 const ESTADO_LABEL: Record<EstadoTarea, string> = {
@@ -28,24 +36,68 @@ const ESTADO_TONE: Record<EstadoTarea, BadgeTone> = {
   CANCELADA: "critical",
 };
 
-const columns: DataTableColumn<Tarea>[] = [
-  { key: "titulo", label: "Tarea", render: (t) => <strong>{t.titulo}</strong> },
-  {
-    key: "cliente",
-    label: "Cliente",
-    render: (t) => (
-      <Link to={`/clientes/${t.numeroDocumentoCliente}`}>{t.numeroDocumentoCliente}</Link>
-    ),
-  },
-  { key: "responsable", label: "Responsable", render: (t) => t.responsable },
-  { key: "prioridad", label: "Prioridad", render: (t) => t.prioridad },
-  {
-    key: "estado",
-    label: "Estado",
-    render: (t) => <Badge tone={ESTADO_TONE[t.estado]}>{ESTADO_LABEL[t.estado]}</Badge>,
-  },
-  { key: "vencimiento", label: "Vence", render: (t) => t.fechaVencimiento ?? "—" },
-];
+// Antes se mostraba como texto plano, sin color ni ícono — no cumplía el
+// requisito de "prioridad visible con texto + ícono + color" del Handoff
+// Postventa.
+const PRIORIDAD_LABEL: Record<PrioridadTarea, string> = {
+  ALTA: "🔴 Alta",
+  MEDIA: "🟡 Media",
+  BAJA: "⚪ Baja",
+};
+const PRIORIDAD_TONE: Record<PrioridadTarea, BadgeTone> = {
+  ALTA: "critical",
+  MEDIA: "warning",
+  BAJA: "neutral",
+};
+
+// Solo cubre las 3 señales de incidencia con dato real precalculado en el
+// dataset (altaPendiente/certificadoPorVencer/certificadoVenceHoy) — no es
+// el conjunto completo de incidencias de APIWorking, que sigue pendiente
+// del endpoint agregador de Fase 2 (ver Especificaciones Postventa v2).
+function senalesIncidenciaCliente(cliente: PostVentaCliente | undefined): string[] {
+  if (!cliente) return [];
+  const senales: string[] = [];
+  if (cliente.certificadoVenceHoy) senales.push("Certificado vence hoy");
+  else if (cliente.certificadoPorVencer) senales.push("Certificado por vencer");
+  if (cliente.altaPendiente) senales.push("Alta pendiente");
+  return senales;
+}
+
+function buildColumns(
+  clientesPorDocumento: Map<string, PostVentaCliente>
+): DataTableColumn<Tarea>[] {
+  return [
+    {
+      key: "prioridadIncidencia",
+      label: "Prioridad",
+      render: (t) => {
+        const senales = senalesIncidenciaCliente(clientesPorDocumento.get(t.numeroDocumentoCliente));
+        if (senales.length === 0) return <span className="muted">—</span>;
+        return <Badge tone="critical">⚠ Incidencia: {senales.join(" · ")}</Badge>;
+      },
+    },
+    { key: "titulo", label: "Tarea", render: (t) => <strong>{t.titulo}</strong> },
+    {
+      key: "cliente",
+      label: "Cliente",
+      render: (t) => (
+        <Link to={`/clientes/${t.numeroDocumentoCliente}`}>{t.numeroDocumentoCliente}</Link>
+      ),
+    },
+    { key: "responsable", label: "Responsable", render: (t) => t.responsable },
+    {
+      key: "prioridad",
+      label: "Prioridad de la tarea",
+      render: (t) => <Badge tone={PRIORIDAD_TONE[t.prioridad]}>{PRIORIDAD_LABEL[t.prioridad]}</Badge>,
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      render: (t) => <Badge tone={ESTADO_TONE[t.estado]}>{ESTADO_LABEL[t.estado]}</Badge>,
+    },
+    { key: "vencimiento", label: "Vence", render: (t) => t.fechaVencimiento ?? "—" },
+  ];
+}
 
 const PERIODICIDADES: { value: Periodicidad; label: string }[] = [
   { value: "MENSUAL", label: "Mensual" },
@@ -248,7 +300,14 @@ function TareasRenovacionPanel() {
           Contactados
         </button>
       </div>
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn btn-ghost" onClick={refetch}>
+            Reintentar
+          </button>
+        </div>
+      )}
       <DataTable
         columns={columnasRenovacion}
         rows={filas}
@@ -275,13 +334,38 @@ function TareasRenovacionPanel() {
   );
 }
 
+// Sin filtro de "solo con incidencia" en el backend — se trae toda la
+// cartera con pageSize grande (mismo patron que Renovaciones.tsx, "no es
+// paginado como Clientes") solo para cruzar las 3 señales de incidencia
+// reales por numeroDocumentoCliente, no para listar clientes aca.
+const CLIENTES_PAGE_SIZE = 1000;
+
 export function TareasPage() {
   const [estado, setEstado] = useState<EstadoTarea | "">("");
   const [soloVencidas, setSoloVencidas] = useState(false);
-  const { data, loading, error } = useTareas({
+  const [prioridadAbierta, setPrioridadAbierta] = useState(true);
+  const { data, loading, error, refetch } = useTareas({
     estado: estado || undefined,
     vencidas: soloVencidas || undefined,
   });
+  const { data: clientesData } = useClientes({ pageSize: CLIENTES_PAGE_SIZE });
+
+  const clientesPorDocumento = useMemo(() => {
+    const mapa = new Map<string, PostVentaCliente>();
+    for (const c of clientesData?.data ?? []) mapa.set(c.numeroDocumentoCliente, c);
+    return mapa;
+  }, [clientesData]);
+
+  const columns = useMemo(() => buildColumns(clientesPorDocumento), [clientesPorDocumento]);
+
+  const tareasAbiertas = (data ?? []).filter(
+    (t) => t.estado !== "COMPLETADA" && t.estado !== "CANCELADA"
+  );
+  const tareasConIncidencia = tareasAbiertas.filter(
+    (t) => senalesIncidenciaCliente(clientesPorDocumento.get(t.numeroDocumentoCliente)).length > 0
+  );
+  const totalTareas = data?.length ?? 0;
+  const completadas = (data ?? []).filter((t) => t.estado === "COMPLETADA").length;
 
   return (
     <div>
@@ -293,6 +377,34 @@ export function TareasPage() {
       </div>
 
       <TareasRenovacionPanel />
+
+      {!loading && totalTareas > 0 && (
+        <p className="muted" style={{ marginBottom: "var(--space-3)" }}>
+          Progreso de este filtro: {completadas}/{totalTareas} completadas
+        </p>
+      )}
+
+      {tareasConIncidencia.length > 0 && (
+        <CollapsibleCard
+          titulo="Prioridad: clientes con incidencia sin resolver"
+          abierto={prioridadAbierta}
+          onToggle={() => setPrioridadAbierta((v) => !v)}
+          contador={tareasConIncidencia.length}
+          tone="critical"
+        >
+          <p className="muted">
+            Tareas de clientes con alta pendiente o certificado por vencer/vencido hoy — se
+            priorizan antes que el resto de misiones del día. No es el listado completo de
+            incidencias de APIWorking (eso llega con el agregador de Fase 2).
+          </p>
+          <DataTable
+            columns={columns}
+            rows={tareasConIncidencia}
+            rowKey={(t) => t.id}
+            emptyMessage="Sin tareas prioritarias."
+          />
+        </CollapsibleCard>
+      )}
 
       <h2 style={{ marginTop: "var(--space-5)" }}>Todas las tareas</h2>
 
@@ -322,7 +434,14 @@ export function TareasPage() {
         </label>
       </FilterBar>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn btn-ghost" onClick={refetch}>
+            Reintentar
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <DataTable
