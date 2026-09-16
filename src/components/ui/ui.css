@@ -99,6 +99,21 @@
   color: var(--color-future);
 }
 
+/* Banda de error con reintento — compartida por cualquier pantalla que
+   necesite el estado "Error de carga" del Handoff Postventa (antes vivía
+   solo en Dashboard.css). */
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: var(--color-critical-bg);
+  color: var(--color-critical);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));

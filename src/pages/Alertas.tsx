@@ -107,6 +107,16 @@ export function AlertasPage() {
 
   const clientes = useMemo(() => agruparPorCliente(data?.data ?? []), [data]);
 
+  // Contador de severidad de lo que esta efectivamente visible con los
+  // filtros actuales (no un total global aparte, para no mostrar una cifra
+  // que no coincida con las filas de abajo) — siempre con texto, nunca solo
+  // un punto de color.
+  const conteoPorNivel = useMemo(() => {
+    const conteo = { CRITICAL: 0, WARNING: 0, INFO: 0 };
+    for (const alerta of data?.data ?? []) conteo[alerta.nivel] += 1;
+    return conteo;
+  }, [data]);
+
   const columns: DataTableColumn<ClienteAlertas>[] = useMemo(
     () => [
       columnaAccionesCliente<ClienteAlertas>(
@@ -200,6 +210,18 @@ export function AlertasPage() {
         </div>
       </div>
 
+      {!loading && (
+        <div
+          className="modulo-clientes-periodo"
+          style={{ marginBottom: 12, gap: 8 }}
+          aria-label="Conteo de alertas por severidad en esta vista"
+        >
+          <Badge tone="critical">⚠ {conteoPorNivel.CRITICAL} crítica(s)</Badge>
+          <Badge tone="warning">⚠ {conteoPorNivel.WARNING} advertencia(s)</Badge>
+          <Badge tone="info">ℹ️ {conteoPorNivel.INFO} info</Badge>
+        </div>
+      )}
+
       <div className="modulo-clientes-periodo" style={{ marginBottom: 12 }}>
         <button
           type="button"
@@ -244,7 +266,14 @@ export function AlertasPage() {
         </div>
       </FilterBar>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button type="button" className="btn btn-ghost" onClick={refetch}>
+            Reintentar
+          </button>
+        </div>
+      )}
 
       <div className="card">
         <DataTable

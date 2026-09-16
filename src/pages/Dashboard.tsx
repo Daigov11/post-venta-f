@@ -68,7 +68,7 @@ export function DashboardPage() {
       </div>
 
       {error && (
-        <div className="dashboard-error-banner" role="alert">
+        <div className="error-banner" role="alert">
           <span>{error}</span>
           <button type="button" className="btn btn-ghost" onClick={refetch}>
             Reintentar
