@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { NotaForm } from "../components/forms/NotaForm";
 import { SeguimientoForm } from "../components/forms/SeguimientoForm";
@@ -58,6 +58,25 @@ function IncidenciaEstadoBadge({ resuelta }: { resuelta: boolean }) {
     <Badge tone="success">Resuelta</Badge>
   ) : (
     <Badge tone="warning">Abierta</Badge>
+  );
+}
+
+// Distingue visualmente datos que vienen de APIWorking (fuente externa, solo
+// lectura) de trabajo propio de la plataforma — ver Especificaciones
+// Postventa v2 / Handoff Postventa. Icono + texto siempre, nunca solo color.
+function SourceTag({ origen }: { origen: "apiworking" | "local" }) {
+  return origen === "apiworking" ? (
+    <Badge tone="info">🌐 APIWorking</Badge>
+  ) : (
+    <Badge tone="local">🗂️ Plataforma local</Badge>
+  );
+}
+
+function SectionHeader({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+      {children}
+    </div>
   );
 }
 
@@ -1077,7 +1096,10 @@ export function ClienteFichaPage() {
         </section>
 
         <section className="card ficha-section ficha-full-width">
-          <h2>Historial de órdenes de servicio ({cliente.cantidadOs})</h2>
+          <SectionHeader>
+            <h2>Historial de órdenes de servicio ({cliente.cantidadOs})</h2>
+            <SourceTag origen="apiworking" />
+          </SectionHeader>
           <div className="ficha-field-list">
             {cliente.osRefs.map((os) => (
               <div key={os.idOrdenServicio} className="ficha-field-row">
@@ -1094,21 +1116,36 @@ export function ClienteFichaPage() {
         </section>
 
         <section className="card ficha-section ficha-full-width">
-          <h2>Incidencias{incidenciasResp ? ` (${incidenciasResp.total})` : ""}</h2>
+          <SectionHeader>
+            <h2>Incidencias{incidenciasResp ? ` (${incidenciasResp.total})` : ""}</h2>
+            <SourceTag origen="apiworking" />
+          </SectionHeader>
           <p className="muted">
             Incidencias reportadas para este cliente en APIWorking, con su estado real de
-            resolución.
+            resolución. No comparten lista con notas o tareas internas — esas viven en la
+            pestaña "Notas y tareas".
           </p>
-          {incidenciasResp === null && (
+          <div className="form-actions" style={{ justifyContent: "flex-start", gap: 8 }}>
+            {incidenciasResp === null && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleCargarIncidencias}
+                disabled={loadingIncidencias}
+              >
+                {loadingIncidencias ? "Cargando..." : "Ver incidencias"}
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={handleCargarIncidencias}
-              disabled={loadingIncidencias}
+              disabled
+              title="Requiere el endpoint de creación en APIWorking, aún no conectado (ver IncidenciaManual)"
             >
-              {loadingIncidencias ? "Cargando..." : "Ver incidencias"}
+              Crear incidencia
             </button>
-          )}
+            <Badge tone="future">Próximamente · Fase 2</Badge>
+          </div>
           {errorIncidencias && <p className="error-text">{errorIncidencias}</p>}
           {incidenciasResp !== null && incidenciasResp.total > 0 && (
             <>
@@ -1168,7 +1205,10 @@ export function ClienteFichaPage() {
         </section>
 
         <section className="card ficha-section ficha-full-width">
-          <h2>Capacitaciones{capacitaciones ? ` (${capacitaciones.length})` : ""}</h2>
+          <SectionHeader>
+            <h2>Capacitaciones{capacitaciones ? ` (${capacitaciones.length})` : ""}</h2>
+            <SourceTag origen="apiworking" />
+          </SectionHeader>
           <p className="muted">
             Capacitaciones y reforzamientos dictados a este cliente en APIWorking.
           </p>
@@ -1214,7 +1254,10 @@ export function ClienteFichaPage() {
         </section>
 
         <section className="card ficha-section ficha-full-width">
-          <h2>Historial de seguimiento{historial ? ` (${historial.length})` : ""}</h2>
+          <SectionHeader>
+            <h2>Historial de seguimiento{historial ? ` (${historial.length})` : ""}</h2>
+            <SourceTag origen="apiworking" />
+          </SectionHeader>
           <p className="muted">
             Bitácora real de APIWorking para la OS vigente ({cliente.ordenVigente.numeroOs}) —
             cambios de estado, llamadas al cliente e incidencias registradas por el equipo.
@@ -1288,7 +1331,10 @@ export function ClienteFichaPage() {
       {tab === "notas" && (
       <div className="ficha-grid">
         <section className="card ficha-section ficha-full-width">
-          <h2>Tareas ({tareas.length})</h2>
+          <SectionHeader>
+            <h2>Tareas ({tareas.length})</h2>
+            <SourceTag origen="local" />
+          </SectionHeader>
           {tareas.length === 0 ? (
             <EmptyState title="Sin tareas registradas" />
           ) : (
@@ -1301,7 +1347,10 @@ export function ClienteFichaPage() {
         </section>
 
         <section className="card ficha-section ficha-full-width">
-          <h2>Notas ({notas.length})</h2>
+          <SectionHeader>
+            <h2>Notas ({notas.length})</h2>
+            <SourceTag origen="local" />
+          </SectionHeader>
           {notas.length === 0 ? (
             <EmptyState title="Sin notas registradas" />
           ) : (
