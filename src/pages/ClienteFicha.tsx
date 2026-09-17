@@ -169,6 +169,13 @@ export function ClienteFichaPage() {
   const [tab, setTab] = useState<FichaTab>("resumen");
   const [notaDrawerOpen, setNotaDrawerOpen] = useState(false);
   const [tareaDrawerOpen, setTareaDrawerOpen] = useState(false);
+  // Prefill del formulario de tarea — vacio (solo responsable) desde el
+  // boton genérico de la cabecera, o con título/descripción de una
+  // incidencia puntual cuando se crea desde esa fila (ver sección
+  // Incidencias más abajo). Hallazgo de la auditoría de Fase 1: antes "Crear
+  // tarea" era siempre genérico, sin enlace real a la incidencia que lo
+  // origina.
+  const [tareaInicial, setTareaInicial] = useState<Partial<TareaFormValues>>({});
   const [interesesDrawerOpen, setInteresesDrawerOpen] = useState(false);
   const [seguimientoPvDrawerOpen, setSeguimientoPvDrawerOpen] = useState(false);
   const [savingNota, setSavingNota] = useState(false);
@@ -482,7 +489,14 @@ export function ClienteFichaPage() {
           <button type="button" className="btn btn-secondary" onClick={() => setNotaDrawerOpen(true)}>
             Registrar nota
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => setTareaDrawerOpen(true)}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              setTareaInicial({ responsable: username ?? "" });
+              setTareaDrawerOpen(true);
+            }}
+          >
             Crear tarea
           </button>
           <button
@@ -1198,6 +1212,24 @@ export function ClienteFichaPage() {
                     {inc.aCargo && inc.aCargo !== "SIN ASIGNAR" && ` · A cargo de ${inc.aCargo}`}
                     {inc.reportadoPorCliente && " · Reportada por el cliente"}
                   </div>
+                  {!inc.resuelta && (
+                    <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 4 }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        onClick={() => {
+                          setTareaInicial({
+                            titulo: `Seguimiento incidencia: ${inc.tipo || "Sin tipo"}`,
+                            descripcion: inc.caso || inc.descripcion || "",
+                            responsable: username ?? "",
+                          });
+                          setTareaDrawerOpen(true);
+                        }}
+                      >
+                        Crear tarea desde esta incidencia
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1380,7 +1412,8 @@ export function ClienteFichaPage() {
 
       <Drawer open={tareaDrawerOpen} onClose={() => setTareaDrawerOpen(false)} title="Crear tarea">
         <TareaForm
-          initial={{ responsable: username ?? "" }}
+          key={tareaDrawerOpen ? JSON.stringify(tareaInicial) : "closed"}
+          initial={tareaInicial}
           onSubmit={handleAddTarea}
           onCancel={() => setTareaDrawerOpen(false)}
           submitting={savingTarea}
