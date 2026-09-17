@@ -50,17 +50,19 @@ const PRIORIDAD_TONE: Record<PrioridadTarea, BadgeTone> = {
   BAJA: "neutral",
 };
 
-// Solo cubre las 3 señales de incidencia con dato real precalculado en el
-// dataset (altaPendiente/certificadoPorVencer/certificadoVenceHoy) — no es
-// el conjunto completo de incidencias de APIWorking, que sigue pendiente
-// del endpoint agregador de Fase 2 (ver Especificaciones Postventa v2).
-function senalesIncidenciaCliente(cliente: PostVentaCliente | undefined): string[] {
-  if (!cliente) return [];
-  const senales: string[] = [];
-  if (cliente.certificadoVenceHoy) senales.push("Certificado vence hoy");
-  else if (cliente.certificadoPorVencer) senales.push("Certificado por vencer");
-  if (cliente.altaPendiente) senales.push("Alta pendiente");
-  return senales;
+// Auditoría Fase 1: la primera version de esto usaba altaPendiente/
+// certificadoPorVencer/certificadoVenceHoy directamente y lo llamaba
+// "incidencia" — esas 3 señales SON exactamente las condiciones de disparo
+// de los tipos de alerta ALTA_PENDIENTE/CERTIFICADO_POR_VENCER/
+// CERTIFICADO_VENCE_HOY (ver backend/src/engines/alertas.engine.ts), no el
+// modulo de incidencias de APIWorking. Mostrarlo como "incidencia" en una
+// pantalla que no es la ficha del cliente arriesgaba leerse como el conteo
+// global de incidencias, que no existe sin el endpoint agregador de Fase 2.
+// Se reemplaza por metadata.alertasCount.CRITICAL — el mismo agregado ya
+// validado (una sola pasada en memoria por refresh del dataset, ver
+// postventaCache.ts) que usa la columna "Alertas" de Cartera.
+function tieneAlertaCritica(cliente: PostVentaCliente | undefined): boolean {
+  return (cliente?.metadata.alertasCount.CRITICAL ?? 0) > 0;
 }
 
 function buildColumns(
@@ -68,12 +70,12 @@ function buildColumns(
 ): DataTableColumn<Tarea>[] {
   return [
     {
-      key: "prioridadIncidencia",
+      key: "prioridadAlerta",
       label: "Prioridad",
       render: (t) => {
-        const senales = senalesIncidenciaCliente(clientesPorDocumento.get(t.numeroDocumentoCliente));
-        if (senales.length === 0) return <span className="muted">—</span>;
-        return <Badge tone="critical">⚠ Incidencia: {senales.join(" · ")}</Badge>;
+        const cliente = clientesPorDocumento.get(t.numeroDocumentoCliente);
+        if (!tieneAlertaCritica(cliente)) return <span className="muted">—</span>;
+        return <Badge tone="critical">⚠ Cliente con alerta crítica</Badge>;
       },
     },
     { key: "titulo", label: "Tarea", render: (t) => <strong>{t.titulo}</strong> },
@@ -361,8 +363,8 @@ export function TareasPage() {
   const tareasAbiertas = (data ?? []).filter(
     (t) => t.estado !== "COMPLETADA" && t.estado !== "CANCELADA"
   );
-  const tareasConIncidencia = tareasAbiertas.filter(
-    (t) => senalesIncidenciaCliente(clientesPorDocumento.get(t.numeroDocumentoCliente)).length > 0
+  const tareasPrioritarias = tareasAbiertas.filter((t) =>
+    tieneAlertaCritica(clientesPorDocumento.get(t.numeroDocumentoCliente))
   );
   const totalTareas = data?.length ?? 0;
   const completadas = (data ?? []).filter((t) => t.estado === "COMPLETADA").length;
@@ -384,22 +386,23 @@ export function TareasPage() {
         </p>
       )}
 
-      {tareasConIncidencia.length > 0 && (
+      {tareasPrioritarias.length > 0 && (
         <CollapsibleCard
-          titulo="Prioridad: clientes con incidencia sin resolver"
+          titulo="Prioridad: clientes con alerta crítica"
           abierto={prioridadAbierta}
           onToggle={() => setPrioridadAbierta((v) => !v)}
-          contador={tareasConIncidencia.length}
+          contador={tareasPrioritarias.length}
           tone="critical"
         >
           <p className="muted">
-            Tareas de clientes con alta pendiente o certificado por vencer/vencido hoy — se
-            priorizan antes que el resto de misiones del día. No es el listado completo de
-            incidencias de APIWorking (eso llega con el agregador de Fase 2).
+            Tareas de clientes con al menos una alerta crítica activa (mismo conteo que la
+            columna "Alertas" de Cartera) — se priorizan antes que el resto de misiones del día.
+            No es el módulo de incidencias de APIWorking, que sigue disponible solo en la ficha
+            del cliente hasta que exista el endpoint agregador de Fase 2.
           </p>
           <DataTable
             columns={columns}
-            rows={tareasConIncidencia}
+            rows={tareasPrioritarias}
             rowKey={(t) => t.id}
             emptyMessage="Sin tareas prioritarias."
           />

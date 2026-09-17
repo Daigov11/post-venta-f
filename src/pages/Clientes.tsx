@@ -303,25 +303,6 @@ function buildAllColumns(
     },
   },
   {
-    // Solo cubre los 3 tipos de incidencia con señal precalculada en el
-    // dataset (altaPendiente/certificadoPorVencer/certificadoVenceHoy) — el
-    // resto de incidencias de APIWorking se consultan bajo demanda desde la
-    // ficha del cliente (ver Especificaciones Postventa v2), no hay un
-    // conteo global disponible todavia sin el endpoint agregador de Fase 2.
-    key: "incidencias",
-    label: "Incidencias",
-    align: "center",
-    render: (c) => {
-      const senales: string[] = [];
-      if (c.certificadoVenceHoy) senales.push("Certificado vence hoy");
-      else if (c.certificadoPorVencer) senales.push("Certificado por vencer");
-      if (c.altaPendiente) senales.push("Alta pendiente");
-      if (senales.length === 0) return <span className="muted">Sin señales detectadas</span>;
-      const tone = c.certificadoVenceHoy || c.altaPendiente ? "critical" : "warning";
-      return <Badge tone={tone}>⚠ {senales.join(" · ")}</Badge>;
-    },
-  },
-  {
     key: "tareas",
     label: "Tareas asignadas",
     align: "center",
@@ -361,7 +342,7 @@ const DEFAULT_VISIBLE_COLUMNS = [
   "telefono",
   "plan",
   "deuda",
-  "incidencias",
+  "alertas",
   "ingresosMensuales",
   "renovacion",
   "ejecutivo",

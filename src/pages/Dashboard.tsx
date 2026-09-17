@@ -136,6 +136,7 @@ export function DashboardPage() {
                 label="Cobrado este mes"
                 value={formatCurrency(data.totalCobradoMes)}
                 tone="success"
+                hint="Cálculo nuevo (total − deuda por comprobante) — a confirmar con negocio, no hay una fórmula de 'cobrado' agregado previa en el sistema"
               />
               <KpiCard
                 label="Deuda total"
