@@ -133,10 +133,10 @@ export function DashboardPage() {
                 value={formatCurrency(data.estimadoRecaudarHoy)}
               />
               <KpiCard
-                label="Cobrado este mes"
+                label="Cobrado estimado (mes)"
                 value={formatCurrency(data.totalCobradoMes)}
-                tone="success"
-                hint="Cálculo nuevo (total − deuda por comprobante) — a confirmar con negocio, no hay una fórmula de 'cobrado' agregado previa en el sistema"
+                tone="pending"
+                hint="Pendiente de validación con negocio — no suma pagos registrados directamente (total − deuda por comprobante), no es la definición aprobada de 'Cobrado'"
               />
               <KpiCard
                 label="Deuda total"
