@@ -18,6 +18,11 @@ import { formatCurrency, formatNumber } from "../utils/format";
 // tamaño realista de cartera.
 const PAGE_SIZE = 1000;
 
+// Ciclos de facturacion conocidos — confirmado con negocio (Fase 2) que solo
+// aplican a clientes Mensual (diaCicloMensual). Cualquier otro dia real cae
+// en "otros", nunca se descarta el cliente.
+const CICLOS_CONOCIDOS = [1, 12, 22];
+
 type Alcance = "ventana" | "esteMes" | "mesEspecifico" | "todos";
 type Vista = "proximas" | "vencidas" | "cobranzaMensual";
 type PeriodicidadFiltro = "" | "MENSUAL" | "TRIMESTRAL" | "SEMESTRAL" | "ANUAL";
@@ -170,6 +175,17 @@ function columnasCobranzaMensual(
           sistemas={c.sistemas}
         />
       ),
+    },
+    {
+      key: "ciclo",
+      label: "Ciclo",
+      align: "center",
+      render: (c) =>
+        c.diaCicloMensual === null ? (
+          <span className="muted">—</span>
+        ) : (
+          String(c.diaCicloMensual).padStart(2, "0")
+        ),
     },
     {
       key: "monto",
@@ -745,6 +761,30 @@ export function RenovacionesPage() {
   const mesSeleccionado = useMemo(() => mesRelativo(ahora, mesOffset), [ahora, mesOffset]);
   const esMesActual = mesOffset === 0;
 
+  // Ciclo de facturacion (dia real, ver diaCicloMensual) — confirmado con
+  // negocio (Fase 2) que solo aplica a clientes Mensual; Trimestral/
+  // Semestral/Anual no tienen un dia de ciclo identificable, por eso este
+  // filtro vive solo dentro de la pestaña Cobranza Mensual, no en las otras.
+  const [cicloFiltro, setCicloFiltro] = useState<number | "">("");
+  const mensualesFiltrados = useMemo(
+    () => (cicloFiltro === "" ? mensuales : mensuales.filter((c) => c.diaCicloMensual === cicloFiltro)),
+    [mensuales, cicloFiltro]
+  );
+  const subtotalesPorCiclo = useMemo(() => {
+    const grupos = new Map<number | "otros", { count: number; monto: number }>();
+    for (const c of mensuales) {
+      const clave: number | "otros" =
+        c.diaCicloMensual !== null && CICLOS_CONOCIDOS.includes(c.diaCicloMensual)
+          ? c.diaCicloMensual
+          : "otros";
+      const actual = grupos.get(clave) ?? { count: 0, monto: 0 };
+      actual.count += 1;
+      actual.monto += c.ingresoMensualReal ?? 0;
+      grupos.set(clave, actual);
+    }
+    return grupos;
+  }, [mensuales]);
+
   const cobranzaMensual = useMemo(() => {
     let facturado = 0;
     let pagado = 0;
@@ -757,7 +797,7 @@ export function RenovacionesPage() {
       VENCIDO_SIN_FACTURAR: 0,
       SIN_COMPROBANTE: 0,
     };
-    for (const c of mensuales) {
+    for (const c of mensualesFiltrados) {
       const r = resumenMesCliente(c, mesSeleccionado.anio, mesSeleccionado.mes);
       if (r.tieneComprobante) {
         clientesConComprobante += 1;
@@ -774,7 +814,7 @@ export function RenovacionesPage() {
       clientesConComprobante,
       estados,
     };
-  }, [mensuales, mesSeleccionado, ahora, esMesActual]);
+  }, [mensualesFiltrados, mesSeleccionado, ahora, esMesActual]);
 
   const columnasCobranza = useMemo(
     () => columnasCobranzaMensual(mesSeleccionado, ahora, esMesActual, setClienteSeleccionado),
@@ -795,10 +835,10 @@ export function RenovacionesPage() {
     }
     if (vista === "cobranzaMensual") {
       return {
-        filas: mensuales,
+        filas: mensualesFiltrados,
         columnas: columnasExportCobranzaMensual(mesSeleccionado),
-        nombreArchivo: `cobranza_mensual_${mesSeleccionado.label.replace(/\s+/g, "_")}`,
-        titulo: `Cobranza Mensual — ${mesSeleccionado.label}`,
+        nombreArchivo: `cobranza_mensual_${mesSeleccionado.label.replace(/\s+/g, "_")}${cicloFiltro ? `_ciclo${cicloFiltro}` : ""}`,
+        titulo: `Cobranza Mensual — ${mesSeleccionado.label}${cicloFiltro ? ` — Ciclo ${String(cicloFiltro).padStart(2, "0")}` : ""}`,
       };
     }
     return {
@@ -807,7 +847,7 @@ export function RenovacionesPage() {
       nombreArchivo: "renovaciones_proximas_a_vencer",
       titulo: "Renovaciones — Próximas a vencer",
     };
-  }, [vista, filasProximas, filasVencidas, mensuales, mesSeleccionado]);
+  }, [vista, filasProximas, filasVencidas, mensualesFiltrados, mesSeleccionado, cicloFiltro]);
 
   return (
     <div>
@@ -986,6 +1026,41 @@ export function RenovacionesPage() {
             reales ya emitidos, nunca se proyecta un monto inventado.
           </p>
 
+          <div className="modulo-clientes-periodo" style={{ marginBottom: 8 }}>
+            <button
+              type="button"
+              className={cicloFiltro === "" ? "btn btn-primary" : "btn btn-secondary"}
+              onClick={() => setCicloFiltro("")}
+            >
+              Todos
+            </button>
+            {CICLOS_CONOCIDOS.map((dia) => (
+              <button
+                key={dia}
+                type="button"
+                className={cicloFiltro === dia ? "btn btn-primary" : "btn btn-secondary"}
+                onClick={() => setCicloFiltro(dia)}
+              >
+                Ciclo {String(dia).padStart(2, "0")}
+                {subtotalesPorCiclo.has(dia) ? ` (${subtotalesPorCiclo.get(dia)!.count})` : " (0)"}
+              </button>
+            ))}
+          </div>
+          {subtotalesPorCiclo.has("otros") && (
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16, fontSize: "0.85rem" }}>
+              {subtotalesPorCiclo.get("otros")!.count} cliente(s) Mensual sin ciclo 01/12/22
+              identificable (otro día, o APIWorking no trae un día parseable) — no se pierden, quedan
+              visibles con "Todos" pero no entran en ningún botón de ciclo.
+            </p>
+          )}
+          {cicloFiltro !== "" && (
+            <p className="muted" style={{ marginTop: 0, marginBottom: 16, fontSize: "0.85rem" }}>
+              Subtotal ciclo {String(cicloFiltro).padStart(2, "0")}:{" "}
+              {formatNumber(subtotalesPorCiclo.get(cicloFiltro)?.count ?? 0)} cliente(s) ·{" "}
+              {formatCurrency(subtotalesPorCiclo.get(cicloFiltro)?.monto ?? 0)} en ingresos mensuales
+            </p>
+          )}
+
           <div
             className="card"
             style={{
@@ -1030,7 +1105,7 @@ export function RenovacionesPage() {
             <KpiCard
               label={`Facturado — ${mesSeleccionado.label}`}
               value={formatCurrency(cobranzaMensual.facturado)}
-              hint={`${formatNumber(cobranzaMensual.clientesConComprobante)} de ${formatNumber(mensuales.length)} clientes con comprobante${esMesActual ? " hasta hoy" : " ese mes"}`}
+              hint={`${formatNumber(cobranzaMensual.clientesConComprobante)} de ${formatNumber(mensualesFiltrados.length)} clientes con comprobante${esMesActual ? " hasta hoy" : " ese mes"}`}
             />
             <KpiCard
               label="Pagado"
@@ -1187,10 +1262,14 @@ export function RenovacionesPage() {
         {vista === "cobranzaMensual" && (
           <DataTable
             columns={columnasCobranza}
-            rows={mensuales}
+            rows={mensualesFiltrados}
             rowKey={(c) => c.numeroDocumentoCliente}
             loading={loading}
-            emptyMessage="No hay clientes con plan mensual."
+            emptyMessage={
+              cicloFiltro === ""
+                ? "No hay clientes con plan mensual."
+                : `Ningún cliente mensual en el ciclo ${String(cicloFiltro).padStart(2, "0")}.`
+            }
           />
         )}
       </div>

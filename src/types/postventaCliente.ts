@@ -136,6 +136,10 @@ export interface PostVentaCliente {
   proximaRenovacion: string | null;
   diasParaRenovacion: number | null;
   renovacionEnAlerta: boolean;
+  // Dia real de facturacion (1/12/22/etc.), solo para periodicidad MENSUAL —
+  // confirmado con negocio que el ciclo de facturacion como filtro solo
+  // aplica ahi. null si no es Mensual o si no hay dia identificable.
+  diaCicloMensual: number | null;
   vencidoDesde: string | null;
   diasVencido: number | null;
   ingresoMensualReal: number | null;
