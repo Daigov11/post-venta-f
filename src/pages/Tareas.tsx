@@ -65,8 +65,19 @@ function tieneAlertaCritica(cliente: PostVentaCliente | undefined): boolean {
   return (cliente?.metadata.alertasCount.CRITICAL ?? 0) > 0;
 }
 
+// Suma dias corridos a una fecha (YYYY-MM-DD o vacio) y devuelve YYYY-MM-DD
+// — mismo formato que ya acepta PATCH /api/tareas (fechaVencimiento).
+function postergarFecha(fechaActual: string | null, dias: number): string {
+  const base = fechaActual ? new Date(fechaActual) : new Date();
+  base.setDate(base.getDate() + dias);
+  return base.toISOString().slice(0, 10);
+}
+
 function buildColumns(
-  clientesPorDocumento: Map<string, PostVentaCliente>
+  clientesPorDocumento: Map<string, PostVentaCliente>,
+  onCompletar: (tarea: Tarea) => void,
+  onPostergar: (tarea: Tarea) => void,
+  procesandoId: number | null
 ): DataTableColumn<Tarea>[] {
   return [
     {
@@ -98,6 +109,37 @@ function buildColumns(
       render: (t) => <Badge tone={ESTADO_TONE[t.estado]}>{ESTADO_LABEL[t.estado]}</Badge>,
     },
     { key: "vencimiento", label: "Vence", render: (t) => t.fechaVencimiento ?? "—" },
+    {
+      key: "accionesTarea",
+      label: "Acciones",
+      render: (t) => {
+        if (t.estado === "COMPLETADA" || t.estado === "CANCELADA") {
+          return <span className="muted">—</span>;
+        }
+        const procesando = procesandoId === t.id;
+        return (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={procesando}
+              onClick={() => onCompletar(t)}
+            >
+              {procesando ? "..." : "Completar"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={procesando}
+              onClick={() => onPostergar(t)}
+              title={`Nueva fecha: ${postergarFecha(t.fechaVencimiento, 3)}`}
+            >
+              Postergar 3 días
+            </button>
+          </div>
+        );
+      },
+    },
   ];
 }
 
@@ -351,6 +393,7 @@ export function TareasPage() {
     vencidas: soloVencidas || undefined,
   });
   const { data: clientesData } = useClientes({ pageSize: CLIENTES_PAGE_SIZE });
+  const [procesandoId, setProcesandoId] = useState<number | null>(null);
 
   const clientesPorDocumento = useMemo(() => {
     const mapa = new Map<string, PostVentaCliente>();
@@ -358,7 +401,40 @@ export function TareasPage() {
     return mapa;
   }, [clientesData]);
 
-  const columns = useMemo(() => buildColumns(clientesPorDocumento), [clientesPorDocumento]);
+  // Hallazgo de la auditoría de Fase 1: la tabla "Todas las tareas" no tenía
+  // ninguna acción para completar/postergar (solo existía para tareas de
+  // renovación, en TareasRenovacionPanel, y desde la ficha del cliente). Se
+  // reutiliza el mismo PATCH /api/tareas (updateTarea) que ya usan ambas.
+  async function handleCompletar(tarea: Tarea) {
+    setProcesandoId(tarea.id);
+    try {
+      await updateTarea(tarea.id, { estado: "COMPLETADA" });
+      refetch();
+    } finally {
+      setProcesandoId(null);
+    }
+  }
+
+  // "Postergar" no es un estado propio (EstadoTarea no tiene POSTERGADA, y
+  // no se agrega uno nuevo sin validar backend) — se implementa como correr
+  // la fecha límite 3 días, reutilizando el mismo campo fechaVencimiento.
+  // Nota: no se captura un motivo de postergación (mencionado en las specs
+  // como validación deseable) — queda pendiente, no se implementó aquí.
+  async function handlePostergar(tarea: Tarea) {
+    setProcesandoId(tarea.id);
+    try {
+      await updateTarea(tarea.id, { fechaVencimiento: postergarFecha(tarea.fechaVencimiento, 3) });
+      refetch();
+    } finally {
+      setProcesandoId(null);
+    }
+  }
+
+  // Sin useMemo: buildColumns solo arma un array de literales (barato) y
+  // handleCompletar/handlePostergar se recrean cada render de todos modos —
+  // memoizar aca solo agregaba una dependencia manual a mantener sin ahorrar
+  // trabajo real.
+  const columns = buildColumns(clientesPorDocumento, handleCompletar, handlePostergar, procesandoId);
 
   const tareasAbiertas = (data ?? []).filter(
     (t) => t.estado !== "COMPLETADA" && t.estado !== "CANCELADA"
