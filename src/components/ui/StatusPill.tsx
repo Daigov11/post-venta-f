@@ -1,4 +1,21 @@
-import type { EstadoPostVenta, NivelAlerta, SegmentoCartera } from "../../types/postventaCliente";
+import type {
+  EstadoOportunidad,
+  EstadoPostVenta,
+  EstadoTarea,
+  NivelAlerta,
+  OrigenTarea,
+  PrioridadTarea,
+  SegmentoCartera,
+  TipoTarea,
+} from "../../types/postventaCliente";
+import { ESTADO_OPORTUNIDAD_LABEL, ESTADO_OPORTUNIDAD_TONE } from "../../utils/oportunidadLabels";
+import {
+  ESTADO_TAREA_LABEL,
+  ESTADO_TAREA_TONE,
+  ORIGEN_TAREA_LABEL,
+  PRIORIDAD_TAREA_CONFIG,
+  TIPO_TAREA_LABEL,
+} from "../../utils/tareaLabels";
 import { Badge } from "./Badge";
 
 const ESTADO_CONFIG: Record<EstadoPostVenta, { tone: "success" | "warning" | "critical"; icon: string; label: string }> = {
@@ -44,6 +61,31 @@ const SEGMENTO_CONFIG: Record<SegmentoCartera, { tone: "info" | "success" | "war
   PLATA: { tone: "warning", icon: "🥈", label: "Plata" },
   CRITICO: { tone: "critical", icon: "🔴", label: "Crítico" },
 };
+
+export function EstadoTareaPill({ estado }: { estado: EstadoTarea }) {
+  return <Badge tone={ESTADO_TAREA_TONE[estado]}>{ESTADO_TAREA_LABEL[estado]}</Badge>;
+}
+
+export function PrioridadTareaPill({ prioridad }: { prioridad: PrioridadTarea }) {
+  const config = PRIORIDAD_TAREA_CONFIG[prioridad];
+  return <Badge tone={config.tone}>{config.label}</Badge>;
+}
+
+export function TipoTareaPill({ tipo }: { tipo: TipoTarea }) {
+  return (
+    <Badge tone={tipo === "PENDIENTE_CLASIFICACION" ? "pending" : "neutral"}>
+      {TIPO_TAREA_LABEL[tipo]}
+    </Badge>
+  );
+}
+
+export function OrigenTareaBadge({ origen }: { origen: OrigenTarea }) {
+  return <Badge tone="local">{ORIGEN_TAREA_LABEL[origen]}</Badge>;
+}
+
+export function EstadoOportunidadPill({ estado }: { estado: EstadoOportunidad }) {
+  return <Badge tone={ESTADO_OPORTUNIDAD_TONE[estado]}>{ESTADO_OPORTUNIDAD_LABEL[estado]}</Badge>;
+}
 
 export function SegmentoPill({
   segmento,

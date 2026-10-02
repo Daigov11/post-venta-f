@@ -10,3 +10,14 @@ export async function getHistorialSeguimiento(
   );
   return data;
 }
+
+export async function crearSeguimiento(
+  numeroDocumentoCliente: string,
+  observacion: string
+): Promise<{ message: string }> {
+  const { data } = await apiClient.post("/historial-seguimiento", {
+    numeroDocumentoCliente,
+    observacion,
+  });
+  return data;
+}

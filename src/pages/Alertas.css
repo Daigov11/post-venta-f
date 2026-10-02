@@ -1,0 +1,128 @@
+/* Lista/tabla a ancho completo (desktop) vs. tarjetas compactas (movil) —
+   ambas se renderizan y una se oculta por CSS segun el ancho disponible; no
+   hay una grilla de 3-4 columnas para las alertas. */
+.alertas-tabla-desktop {
+  display: block;
+}
+.alertas-lista-movil {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .alertas-tabla-desktop {
+    display: none;
+  }
+  .alertas-lista-movil {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+}
+
+.alertas-tabla-criticidad {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.alertas-tabla-tipo {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+/* "Que paso" / "Siguiente accion": una sola linea con "…" — la fila entera
+   es clickable y abre el drawer con el texto completo, esa es la
+   alternativa a truncar sin mas (nunca se corta sin forma de ver el resto). */
+.alertas-tabla-clamp {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tarjeta compacta de movil — el ⚙ (ActionMenu) arriba a la izquierda junto
+   al nombre del cliente es el unico disparador de acciones; la tarjeta ya no
+   es clicable completa. */
+.alerta-mini-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3);
+}
+.alerta-mini-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.alerta-mini-card-cliente-info {
+  flex: 1;
+  min-width: 0;
+}
+.alerta-mini-card-badges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.alerta-mini-card-tipo {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.alerta-mini-card-cliente {
+  font-weight: 600;
+}
+.alerta-mini-card-ruc {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+}
+.alerta-mini-card-mensaje {
+  margin: 4px 0 0 0;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+/* Detalle dentro del drawer (AlertaDetalleDrawer) — bloques apilados
+   (etiqueta arriba, texto completo abajo) para no apretar oraciones largas
+   en una columna angosta alineada a la derecha. */
+.alerta-detalle-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.alerta-detalle-area {
+  margin-left: auto;
+}
+.alerta-detalle-subtitulo {
+  margin: var(--space-4) 0 var(--space-2) 0;
+  font-size: 0.85rem;
+}
+.alerta-detalle-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.alerta-detalle-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.alerta-detalle-etiqueta {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.alerta-detalle-valor {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.alerta-detalle-actions {
+  flex-wrap: wrap;
+}

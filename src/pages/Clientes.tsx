@@ -1,33 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
-import { Badge } from "../components/ui/Badge";
-import { ColumnCustomizer, type ColumnOption } from "../components/ui/ColumnCustomizer";
-import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
+import { ClientesFiltrosAvanzados } from "../components/panels/ClientesFiltrosAvanzados";
+import { CrearIncidenciaDialog } from "../components/panels/CrearIncidenciaDialog";
+import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
+import { ColumnCustomizer } from "../components/ui/ColumnCustomizer";
+import { DataTable } from "../components/ui/DataTable";
 import { Drawer } from "../components/ui/Drawer";
 import { FilterBar } from "../components/ui/FilterBar";
-import { LlamarButton } from "../components/ui/LlamarButton";
 import { Pagination } from "../components/ui/Pagination";
 import { SearchInput } from "../components/ui/SearchInput";
 import { Skeleton } from "../components/ui/Skeleton";
-import { SistemasBadges } from "../components/ui/SistemasBadges";
-import { EstadoPostVentaPill, SegmentoPill } from "../components/ui/StatusPill";
-import { WhatsAppButton } from "../components/ui/WhatsAppButton";
 import { SavedViewForm } from "../components/forms/SavedViewForm";
+import { CrearSeguimientoDialog } from "./clienteFicha/CrearSeguimientoDialog";
+import {
+  buildAccionesColumn,
+  buildAllColumns,
+  COLUMN_OPTIONS,
+  DEFAULT_VISIBLE_COLUMNS,
+  SORT_FIELD_BY_COLUMN,
+} from "./Clientes.columns";
+import { useAuth } from "../context/AuthContext";
 import type { ClientesQueryParams } from "../services/clientes";
 import { getClienteIntereses } from "../services/intereses";
 import { getReunionesCliente } from "../services/reuniones";
 import { createSavedView } from "../services/savedViews";
+import { createTarea } from "../services/tareas";
 import { useClientes } from "../hooks/useClientes";
 import { useOportunidades } from "../hooks/useOportunidades";
 import { useSavedViews } from "../hooks/useSavedViews";
-import type {
-  EstadoPostVenta,
-  InteresCatalogo,
-  PostVentaCliente,
-  Reunion,
-} from "../types/postventaCliente";
-import { formatCurrency, formatNumber } from "../utils/format";
+import type { EstadoPostVenta, InteresCatalogo, PostVentaCliente, Reunion } from "../types/postventaCliente";
 import "./Clientes.css";
 
 const SCREEN = "clientes";
@@ -38,315 +39,6 @@ const COLUMNS_STORAGE_KEY = "pv_clientes_columns";
 // visibleColumns, que si es una preferencia de largo plazo.
 const FILTERS_STORAGE_KEY = "pv_clientes_filtros_sesion";
 const PAGE_SIZE = 25;
-
-const SORT_FIELD_BY_COLUMN: Record<string, string> = {
-  estado: "estadoPostVentaEfectivo",
-  cliente: "nombreCliente",
-  antiguedad: "antiguedadMeses",
-  comprobantes: "cantidadComprobantesHistorico",
-  deuda: "deudaTotal",
-  renovacion: "diasParaRenovacion",
-  ingresosMensuales: "ingresosClienteMensual",
-  actividad: "diasSinActividad",
-};
-
-// Antes era un array estatico — pasa a funcion porque la columna
-// "oportunidad" necesita el set de clientes con oportunidad activa
-// (viene de otro fetch, useOportunidades, no de PostVentaCliente).
-function buildAllColumns(
-  clientesConOportunidad: Set<string>
-): DataTableColumn<PostVentaCliente>[] {
-  return [
-  {
-    key: "estado",
-    label: "Estado",
-    sortable: true,
-    render: (c) => (
-      <EstadoPostVentaPill estado={c.estadoPostVentaEfectivo} manual={!!c.estadoPostVentaManual} />
-    ),
-  },
-  {
-    key: "segmento",
-    label: "Segmento",
-    render: (c) => (
-      <SegmentoPill segmento={c.segmentoEfectivo} manual={!!c.segmentoManual} />
-    ),
-  },
-  {
-    key: "cliente",
-    label: "Cliente",
-    sortable: true,
-    render: (c) => (
-      <div className="cliente-cell">
-        <Link className="cliente-cell-nombre" to={`/clientes/${c.numeroDocumentoCliente}`}>
-          {c.nombreCliente}
-        </Link>
-        <span className="cliente-cell-ruc">{c.numeroDocumentoCliente}</span>
-        <SistemasBadges sistemas={c.sistemas} />
-      </div>
-    ),
-  },
-  {
-    key: "telefono",
-    label: "Teléfono",
-    render: (c) => {
-      if (!c.telefonoEfectivo) return <span className="muted">—</span>;
-      const limpio = c.telefonoEfectivo.replace(/\D/g, "");
-      return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span>{c.telefonoEfectivo}</span>
-          {limpio && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <LlamarButton
-                numeroDocumentoCliente={c.numeroDocumentoCliente}
-                idOrdenServicio={c.ordenVigente.idOrdenServicio}
-                telefonoLimpio={limpio}
-              />
-              <WhatsAppButton
-                numeroDocumentoCliente={c.numeroDocumentoCliente}
-                idOrdenServicio={c.ordenVigente.idOrdenServicio}
-                telefonoLimpio={limpio}
-              />
-            </div>
-          )}
-        </div>
-      );
-    },
-  },
-  {
-    key: "os",
-    label: "OS",
-    render: (c) => c.ordenVigente.numeroOs + (c.cantidadOs > 1 ? ` (+${c.cantidadOs - 1})` : ""),
-  },
-  {
-    key: "rubro",
-    label: "Rubro",
-    render: (c) => c.rubro,
-  },
-  {
-    key: "nombreComercial",
-    label: "Nombre comercial",
-    render: (c) => c.ordenVigente.postVentaExtra?.nombreComercial ?? "—",
-  },
-  {
-    key: "ingresosMensuales",
-    label: "Ingresos mensuales",
-    align: "right",
-    sortable: true,
-    render: (c) =>
-      c.ordenVigente.postVentaExtra?.ingresosClienteMensual == null
-        ? "—"
-        : formatCurrency(c.ordenVigente.postVentaExtra.ingresosClienteMensual),
-  },
-  {
-    key: "suspendido",
-    label: "Suspendido",
-    align: "center",
-    render: (c) =>
-      c.ordenVigente.postVentaExtra === null ? (
-        <span className="muted">—</span>
-      ) : c.ordenVigente.postVentaExtra.suspendido ? (
-        <Badge tone="critical">Sí</Badge>
-      ) : (
-        <Badge tone="success">No</Badge>
-      ),
-  },
-  {
-    key: "plan",
-    label: "Plan",
-    render: (c) => c.planActual.nombre,
-  },
-  {
-    key: "periodicidad",
-    label: "Periodicidad",
-    render: (c) => c.planActual.periodicidad,
-  },
-  {
-    key: "estadoApiWorking",
-    label: "Estado APIWorking",
-    render: (c) => c.ordenVigente.nEstadoApiWorking,
-  },
-  {
-    key: "antiguedad",
-    label: "Antigüedad",
-    sortable: true,
-    render: (c) => c.antiguedad.texto,
-  },
-  {
-    key: "comprobantes",
-    label: "Comprobantes",
-    sortable: true,
-    align: "right",
-    render: (c) => formatNumber(c.cantidadComprobantesHistorico),
-  },
-  {
-    key: "trabajadores",
-    label: "N° Trabajadores",
-    align: "right",
-    render: (c) =>
-      c.cantidadTrabajadores === null ? (
-        <span className="muted">Sin datos</span>
-      ) : (
-        formatNumber(c.cantidadTrabajadores)
-      ),
-  },
-  {
-    key: "equipo",
-    label: "Equipo",
-    align: "center",
-    render: (c) =>
-      c.ordenVigente.existeEquipo ? (
-        <Badge tone="success">Sí</Badge>
-      ) : (
-        <Badge tone="neutral">No</Badge>
-      ),
-  },
-  {
-    key: "deuda",
-    label: "Deuda / días vencidos",
-    sortable: true,
-    align: "right",
-    render: (c) => (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        <span
-          style={
-            c.deudaTotal > 0
-              ? { color: "var(--color-critical)", fontWeight: 600 }
-              : undefined
-          }
-        >
-          {formatCurrency(c.deudaTotal)}
-        </span>
-        {c.deudaTotal > 0 && c.diasVencido !== null && (
-          <Badge tone="critical">{c.diasVencido} día(s) vencido</Badge>
-        )}
-      </div>
-    ),
-  },
-  {
-    key: "ejecutivo",
-    label: "Ejecutivo",
-    render: (c) => c.ordenVigente.ejecutivo ?? "—",
-  },
-  {
-    key: "ubicacion",
-    label: "Ubicación",
-    render: (c) =>
-      c.ubicacion && "departamento" in c.ubicacion
-        ? `${c.ubicacion.departamento} / ${c.ubicacion.provincia}`
-        : c.ubicacion?.raw ?? "—",
-  },
-  {
-    key: "renovacion",
-    label: "Próximo cobro esperado",
-    sortable: true,
-    align: "right",
-    render: (c) => {
-      if (c.diasParaRenovacion === null || !c.proximaRenovacion) {
-        return <span className="muted">—</span>;
-      }
-      const fecha = new Date(c.proximaRenovacion).toLocaleDateString("es-PE");
-      const badge =
-        c.diasParaRenovacion < 0 ? (
-          <Badge tone="critical">Vencida</Badge>
-        ) : (
-          <Badge tone={c.diasParaRenovacion <= 7 ? "warning" : "neutral"}>
-            {c.diasParaRenovacion} día(s)
-          </Badge>
-        );
-      return (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-          {badge}
-          <span className="muted" style={{ fontSize: "0.78rem" }}>
-            {fecha}
-          </span>
-        </div>
-      );
-    },
-  },
-  {
-    key: "actividad",
-    label: "Última actividad",
-    sortable: true,
-    align: "right",
-    // fechaInactivo (Administrativo/post-venta, fecha_inactivo_formato) es la
-    // fecha/hora real de ultimo ingreso del cliente a su sistema.
-    render: (c) => {
-      const fecha = c.ordenVigente.postVentaExtra?.fechaInactivo;
-      if (c.diasSinActividad === null || !fecha) return <span className="muted">—</span>;
-      const badge =
-        c.diasSinActividad <= 7 ? (
-          <Badge tone="success">{c.diasSinActividad} día(s)</Badge>
-        ) : c.diasSinActividad <= 30 ? (
-          <Badge tone="neutral">{c.diasSinActividad} día(s)</Badge>
-        ) : (
-          <Badge tone="warning">{c.diasSinActividad} día(s)</Badge>
-        );
-      return (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-          <span>{new Date(fecha).toLocaleString("es-PE")}</span>
-          {badge}
-        </div>
-      );
-    },
-  },
-  {
-    key: "alertas",
-    label: "Alertas",
-    align: "center",
-    render: (c) => {
-      const { CRITICAL, WARNING, INFO } = c.metadata.alertasCount;
-      const total = CRITICAL + WARNING + INFO;
-      if (total === 0) return <span className="muted">—</span>;
-      const tone = CRITICAL > 0 ? "critical" : WARNING > 0 ? "warning" : "info";
-      return <Badge tone={tone}>{total}</Badge>;
-    },
-  },
-  {
-    key: "tareas",
-    label: "Tareas asignadas",
-    align: "center",
-    render: (c) => {
-      const abiertas = c.metadata.tareasAbiertasCount;
-      if (abiertas === 0) return <span className="muted">—</span>;
-      return <Badge tone="info">{abiertas}</Badge>;
-    },
-  },
-  {
-    key: "oportunidad",
-    label: "Oportunidad",
-    align: "center",
-    render: (c) =>
-      clientesConOportunidad.has(c.numeroDocumentoCliente) ? (
-        <Badge tone="success">🎯 Sí</Badge>
-      ) : (
-        <span className="muted">—</span>
-      ),
-  },
-  ];
-}
-
-const COLUMN_OPTIONS: ColumnOption[] = buildAllColumns(new Set()).map((c) => ({
-  key: c.key,
-  label: c.label,
-}));
-
-// Set inicial minimo — con los 21 campos disponibles, mostrar todo de
-// entrada satura el cuadro. El resto (segmento, rubro, alertas, etc.) sigue
-// disponible en "Agregar/quitar columnas", y cada usuario lo ajusta a su
-// gusto (persistido en localStorage) — esto es solo lo que ve alguien que
-// nunca lo toco.
-const DEFAULT_VISIBLE_COLUMNS = [
-  "estado",
-  "cliente",
-  "telefono",
-  "plan",
-  "deuda",
-  "alertas",
-  "ingresosMensuales",
-  "renovacion",
-  "ejecutivo",
-];
 
 interface FiltersState {
   search: string;
@@ -369,6 +61,7 @@ interface FiltersState {
   segmento: string;
   renovacionProxima: string;
   sinActividadReciente: string;
+  incluirNoActivas: boolean;
 }
 
 const DEFAULT_FILTERS: FiltersState = {
@@ -392,6 +85,7 @@ const DEFAULT_FILTERS: FiltersState = {
   segmento: "",
   renovacionProxima: "",
   sinActividadReciente: "",
+  incluirNoActivas: false,
 };
 
 interface EstadoGuardado {
@@ -451,6 +145,7 @@ function toQueryParams(
     sinActividadReciente: filters.sinActividadReciente
       ? filters.sinActividadReciente === "true"
       : undefined,
+    incluirNoActivas: filters.incluirNoActivas || undefined,
     sortBy: sortBy as ClientesQueryParams["sortBy"],
     sortDir,
     page,
@@ -479,6 +174,7 @@ export function ClientesPage() {
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [savingView, setSavingView] = useState(false);
 
+  const { username } = useAuth();
   const [accionCliente, setAccionCliente] = useState<PostVentaCliente | null>(null);
   const [accionData, setAccionData] = useState<{
     catalogo: InteresCatalogo[];
@@ -486,6 +182,11 @@ export function ClientesPage() {
     reuniones: Reunion[];
   } | null>(null);
   const [accionLoading, setAccionLoading] = useState(false);
+
+  const [tareaCliente, setTareaCliente] = useState<PostVentaCliente | null>(null);
+  const [savingTarea, setSavingTarea] = useState(false);
+  const [incidenciaCliente, setIncidenciaCliente] = useState<PostVentaCliente | null>(null);
+  const [seguimientoCliente, setSeguimientoCliente] = useState<PostVentaCliente | null>(null);
 
   useEffect(() => {
     localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(visibleColumns));
@@ -521,6 +222,27 @@ export function ClientesPage() {
     cargarAccionData(cliente.numeroDocumentoCliente);
   }
 
+  async function handleSubmitTarea(values: TareaFormValues) {
+    if (!tareaCliente) return;
+    setSavingTarea(true);
+    try {
+      await createTarea({
+        numeroDocumentoCliente: tareaCliente.numeroDocumentoCliente,
+        idOrdenServicio: tareaCliente.ordenVigente.idOrdenServicio,
+        origen: "FICHA_CLIENTE",
+        titulo: values.titulo,
+        descripcion: values.descripcion,
+        responsable: values.responsable,
+        prioridad: values.prioridad,
+        tipo: values.tipo,
+        fechaVencimiento: values.fechaVencimiento || null,
+      });
+      setTareaCliente(null);
+    } finally {
+      setSavingTarea(false);
+    }
+  }
+
   const queryParams = useMemo(
     () => toQueryParams(filters, sortBy, sortDir, page),
     [filters, sortBy, sortDir, page]
@@ -540,30 +262,15 @@ export function ClientesPage() {
     [clientesConOportunidad]
   );
 
-  // <tr> nunca es clicable en esta tabla: cada fila expone esta acción
-  // explícita ("Ver ficha") ademas del enlace sobre el nombre del cliente en
-  // la columna "cliente" — ambos son focables y accionables por teclado.
-  const accionesColumn: DataTableColumn<PostVentaCliente> = {
-    key: "acciones",
-    label: "Acciones",
-    render: (c) => (
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <Link className="btn btn-secondary" to={`/clientes/${c.numeroDocumentoCliente}`}>
-          Ver ficha
-        </Link>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={(event) => {
-            event.stopPropagation();
-            handleAbrirAccion(c);
-          }}
-        >
-          📅 Agendar / 🎯 Interés
-        </button>
-      </div>
-    ),
-  };
+  // <tr> nunca es clicable en esta tabla: cada fila expone su ⚙ (ActionMenu)
+  // ademas del enlace sobre el nombre del cliente en la columna "cliente" —
+  // ambos son focables y accionables por teclado.
+  const accionesColumn = buildAccionesColumn({
+    onAgendar: handleAbrirAccion,
+    onCrearTarea: setTareaCliente,
+    onCrearIncidencia: setIncidenciaCliente,
+    onRegistrarSeguimiento: setSeguimientoCliente,
+  });
   const columns = [accionesColumn, ...allColumns.filter((c) => visibleColumns.includes(c.key))];
 
   function updateFilter<K extends keyof FiltersState>(key: K, value: FiltersState[K]) {
@@ -726,6 +433,17 @@ export function ClientesPage() {
             <option value="false">Activo recientemente</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="filtro-incluir-no-activas">Órdenes no activas</label>
+          <select
+            id="filtro-incluir-no-activas"
+            value={filters.incluirNoActivas ? "true" : ""}
+            onChange={(e) => updateFilter("incluirNoActivas", e.target.value === "true")}
+          >
+            <option value="">Solo órdenes activas</option>
+            <option value="true">Incluir suspendidas / de baja</option>
+          </select>
+        </div>
         <button
           type="button"
           className="btn btn-ghost clientes-more-filters-toggle"
@@ -736,143 +454,14 @@ export function ClientesPage() {
       </FilterBar>
 
       {showMoreFilters && (
-        <FilterBar>
-          <div className="field">
-            <label htmlFor="filtro-equipo">Equipo</label>
-            <select
-              id="filtro-equipo"
-              value={filters.conEquipo}
-              onChange={(e) => updateFilter("conEquipo", e.target.value)}
-            >
-              <option value="">Todos</option>
-              <option value="true">Con equipo</option>
-              <option value="false">Sin equipo</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-doc">Documentación</label>
-            <select
-              id="filtro-doc"
-              value={filters.documentacionCompleta}
-              onChange={(e) => updateFilter("documentacionCompleta", e.target.value)}
-            >
-              <option value="">Todas</option>
-              <option value="true">Completa</option>
-              <option value="false">Incompleta</option>
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-plan">Plan</label>
-            <input
-              id="filtro-plan"
-              value={filters.plan}
-              onChange={(e) => updateFilter("plan", e.target.value)}
-              placeholder="Nombre exacto del plan"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-ejecutivo">Ejecutivo</label>
-            <input
-              id="filtro-ejecutivo"
-              value={filters.ejecutivo}
-              onChange={(e) => updateFilter("ejecutivo", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-tipoos">Tipo OS</label>
-            <input
-              id="filtro-tipoos"
-              value={filters.tipoOS}
-              onChange={(e) => updateFilter("tipoOS", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-distribuidor">Vendedor/Distribuidor</label>
-            <input
-              id="filtro-distribuidor"
-              value={filters.distribuidor}
-              onChange={(e) => updateFilter("distribuidor", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-departamento">Departamento</label>
-            <input
-              id="filtro-departamento"
-              value={filters.departamento}
-              onChange={(e) => updateFilter("departamento", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-ant-min">Antigüedad mín. (meses)</label>
-            <input
-              id="filtro-ant-min"
-              type="number"
-              min={0}
-              value={filters.antiguedadMesesMin}
-              onChange={(e) => updateFilter("antiguedadMesesMin", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-ant-max">Antigüedad máx. (meses)</label>
-            <input
-              id="filtro-ant-max"
-              type="number"
-              min={0}
-              value={filters.antiguedadMesesMax}
-              onChange={(e) => updateFilter("antiguedadMesesMax", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-comp-min">Comprobantes mín.</label>
-            <input
-              id="filtro-comp-min"
-              type="number"
-              min={0}
-              value={filters.comprobantesMin}
-              onChange={(e) => updateFilter("comprobantesMin", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-comp-max">Comprobantes máx.</label>
-            <input
-              id="filtro-comp-max"
-              type="number"
-              min={0}
-              value={filters.comprobantesMax}
-              onChange={(e) => updateFilter("comprobantesMax", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-ingreso-min">Ingresos mensuales mín. (S/)</label>
-            <input
-              id="filtro-ingreso-min"
-              type="number"
-              min={0}
-              value={filters.ingresosMensualesMin}
-              onChange={(e) => updateFilter("ingresosMensualesMin", e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="filtro-ingreso-max">Ingresos mensuales máx. (S/)</label>
-            <input
-              id="filtro-ingreso-max"
-              type="number"
-              min={0}
-              value={filters.ingresosMensualesMax}
-              onChange={(e) => updateFilter("ingresosMensualesMax", e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => {
-              setFilters(DEFAULT_FILTERS);
-              setPage(1);
-            }}
-          >
-            Limpiar filtros
-          </button>
-        </FilterBar>
+        <ClientesFiltrosAvanzados
+          values={filters}
+          onChange={(key, value) => updateFilter(key, value)}
+          onLimpiar={() => {
+            setFilters(DEFAULT_FILTERS);
+            setPage(1);
+          }}
+        />
       )}
 
       {error && <p className="error-text">{error}</p>}
@@ -886,6 +475,7 @@ export function ClientesPage() {
           sortDir={sortDir}
           onSortChange={handleSortChange}
           loading={loading}
+          stickyFirstColumn
         />
       </div>
 
@@ -918,10 +508,45 @@ export function ClientesPage() {
             catalogo={accionData.catalogo}
             marcados={accionData.marcados}
             reuniones={accionData.reuniones}
+            origen={{ modulo: "CLIENTES", etiqueta: "Clientes", entidadTipo: "CLIENTE", entidadId: accionCliente.numeroDocumentoCliente }}
             onChanged={() => cargarAccionData(accionCliente.numeroDocumentoCliente)}
           />
         )}
       </Drawer>
+
+      <Drawer
+        open={tareaCliente !== null}
+        onClose={() => setTareaCliente(null)}
+        title={tareaCliente ? `Crear tarea — ${tareaCliente.nombreCliente}` : undefined}
+      >
+        <TareaForm
+          initial={{ responsable: username ?? "", tipo: "SEGUIMIENTO" }}
+          onSubmit={handleSubmitTarea}
+          onCancel={() => setTareaCliente(null)}
+          submitting={savingTarea}
+        />
+      </Drawer>
+
+      {incidenciaCliente && (
+        <CrearIncidenciaDialog
+          numeroDocumentoCliente={incidenciaCliente.numeroDocumentoCliente}
+          clienteInfo={{
+            nombre: incidenciaCliente.nombreCliente,
+            ruc: incidenciaCliente.numeroDocumentoCliente,
+            ordenVigente: incidenciaCliente.ordenVigente.idOrdenServicio,
+          }}
+          onClose={() => setIncidenciaCliente(null)}
+          onCreada={() => setIncidenciaCliente(null)}
+        />
+      )}
+
+      {seguimientoCliente && (
+        <CrearSeguimientoDialog
+          numeroDocumentoCliente={seguimientoCliente.numeroDocumentoCliente}
+          onClose={() => setSeguimientoCliente(null)}
+          onCreado={() => setSeguimientoCliente(null)}
+        />
+      )}
     </div>
   );
 }

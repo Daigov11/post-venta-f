@@ -141,15 +141,50 @@
   font-size: 0.75rem;
 }
 
-.alerta-item,
 .oportunidad-item {
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-border);
   font-size: 0.85rem;
 }
-.alerta-item:last-child,
 .oportunidad-item:last-child {
   border-bottom: none;
+}
+
+.alertas-resumen-conteo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.alertas-resumen-lista {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.alertas-resumen-item {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.85rem;
+}
+.alertas-resumen-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.alertas-resumen-item-texto {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.alertas-resumen-mas {
+  margin: var(--space-2) 0 0 0;
+  font-size: 0.8rem;
 }
 
 .interes-list {

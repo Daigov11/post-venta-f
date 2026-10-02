@@ -1,5 +1,7 @@
 import { apiClient } from "./client";
 
+export type RolUsuario = "ADMIN" | "ADMINISTRATIVO" | "POSTVENTA";
+
 export interface LoginPayload {
   usuario: string;
   password: string;
@@ -7,6 +9,7 @@ export interface LoginPayload {
 
 export interface LoginResponse {
   usuario: string;
+  rol: RolUsuario;
   [key: string]: unknown;
 }
 
@@ -15,12 +18,17 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
   return data;
 }
 
-export async function checkSession(): Promise<boolean> {
+export interface SessionInfo {
+  authenticated: boolean;
+  rol?: RolUsuario;
+}
+
+export async function checkSession(): Promise<SessionInfo> {
   try {
-    const { data } = await apiClient.get<{ authenticated: boolean }>("/auth/me");
-    return data.authenticated;
+    const { data } = await apiClient.get<SessionInfo>("/auth/me");
+    return data;
   } catch {
-    return false;
+    return { authenticated: false };
   }
 }
 

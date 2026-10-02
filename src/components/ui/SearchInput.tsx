@@ -6,10 +6,12 @@ export function SearchInput({
   value,
   onChange,
   placeholder,
+  id,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  id?: string;
 }) {
   const [local, setLocal] = useState(value);
   const debounced = useDebounce(local, 350);
@@ -25,6 +27,7 @@ export function SearchInput({
 
   return (
     <input
+      id={id}
       type="search"
       className="search-input"
       value={local}

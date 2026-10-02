@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import type { PrioridadTarea } from "../../types/postventaCliente";
+import type { PrioridadTarea, TipoTarea } from "../../types/postventaCliente";
+import { TIPO_TAREA_LABEL } from "../../utils/tareaLabels";
 import "./forms.css";
 
 export interface TareaFormValues {
@@ -8,7 +9,23 @@ export interface TareaFormValues {
   responsable: string;
   prioridad: PrioridadTarea;
   fechaVencimiento: string;
+  tipo: TipoTarea;
 }
+
+// Orden pensado para el selector: primero los tipos "de trabajo" reales, al
+// final RENOVACION (normalmente automatica, rara vez se elige a mano) y
+// PENDIENTE_CLASIFICACION (nunca deberia elegirse al crear una tarea nueva,
+// solo existe para historial — ver migracion 0036).
+const TIPOS_SELECCIONABLES: TipoTarea[] = [
+  "COBRANZA",
+  "DOCUMENTACION",
+  "SOPORTE",
+  "SEGUIMIENTO",
+  "REUNION",
+  "OPORTUNIDAD_COMERCIAL",
+  "RENOVACION",
+  "PENDIENTE_CLASIFICACION",
+];
 
 export function TareaForm({
   initial,
@@ -26,6 +43,7 @@ export function TareaForm({
   const [responsable, setResponsable] = useState(initial?.responsable ?? "");
   const [prioridad, setPrioridad] = useState<PrioridadTarea>(initial?.prioridad ?? "MEDIA");
   const [fechaVencimiento, setFechaVencimiento] = useState(initial?.fechaVencimiento ?? "");
+  const [tipo, setTipo] = useState<TipoTarea>(initial?.tipo ?? "PENDIENTE_CLASIFICACION");
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -36,6 +54,7 @@ export function TareaForm({
       responsable: responsable.trim(),
       prioridad,
       fechaVencimiento,
+      tipo,
     });
   }
 
@@ -49,6 +68,16 @@ export function TareaForm({
           onChange={(event) => setTitulo(event.target.value)}
           required
         />
+      </div>
+      <div className="field">
+        <label htmlFor="tarea-tipo">Tipo</label>
+        <select id="tarea-tipo" value={tipo} onChange={(event) => setTipo(event.target.value as TipoTarea)}>
+          {TIPOS_SELECCIONABLES.map((t) => (
+            <option key={t} value={t}>
+              {TIPO_TAREA_LABEL[t]}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="field">
         <label htmlFor="tarea-descripcion">Descripción</label>

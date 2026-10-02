@@ -5,6 +5,7 @@ import type {
   ClientesQueryResult,
   EstadoPostVenta,
   FichaClienteResponse,
+  ResumenBajas,
   SystemUsersCache,
 } from "../types/postventaCliente";
 
@@ -29,6 +30,10 @@ export interface ClientesQueryParams {
   segmento?: string;
   renovacionProxima?: boolean;
   sinActividadReciente?: boolean;
+  // Por defecto Cartera solo muestra ordenes vigentes realmente activas —
+  // ver modulo Recuperacion. true muestra tambien las que estan suspendidas/
+  // de baja porque es la unica orden del cliente.
+  incluirNoActivas?: boolean;
   nEstadoApiWorkingRaw?: string;
   nuevoGranularidad?: "dia" | "semana" | "mes" | "anio";
   nuevoReferencia?: string;
@@ -110,6 +115,13 @@ export async function getClientesBaja(params: {
   search?: string;
 }): Promise<ClientesBajaQueryResult> {
   const { data } = await apiClient.get<ClientesBajaQueryResult>("/clientes-baja", { params });
+  return data;
+}
+
+// Resumen agregado (solo lectura de cache, no dispara busquedas nuevas
+// contra APIWorking) para el aviso de transparencia de Renovaciones.
+export async function getResumenBajas(): Promise<ResumenBajas> {
+  const { data } = await apiClient.get<ResumenBajas>("/clientes-baja/resumen");
   return data;
 }
 

@@ -51,6 +51,21 @@ a {
   color: var(--color-text-secondary);
 }
 
+/* Oculta visualmente pero deja disponible para lectores de pantalla — para
+   labels de controles compactos que no tienen espacio para un <label>
+   visible (ej. campos de reasignacion inline en tablas). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 button,
 input,
 select,

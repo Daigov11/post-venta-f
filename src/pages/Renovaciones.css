@@ -1,0 +1,119 @@
+.renovaciones-trazabilidad {
+  margin-top: -8px;
+  margin-bottom: var(--space-4);
+  font-size: 0.82rem;
+}
+
+.renovaciones-selector {
+  margin-bottom: var(--space-4);
+}
+
+.renovaciones-selector-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.renovaciones-mes-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.renovaciones-tabs {
+  margin-bottom: var(--space-3);
+}
+
+.renovaciones-facet-field {
+  margin-bottom: var(--space-3);
+}
+
+.renovaciones-facet-titulo {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: var(--space-2);
+}
+
+.renovaciones-facet-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.renovaciones-facet-boton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 92px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.renovaciones-facet-boton:hover {
+  background: var(--color-surface-hover);
+}
+.renovaciones-facet-boton.activo {
+  border-color: var(--color-primary-600);
+  box-shadow: 0 0 0 1px var(--color-primary-600);
+  background: var(--color-primary-50);
+}
+.renovaciones-facet-boton:focus-visible {
+  outline: 2px solid var(--color-primary-600);
+  outline-offset: 2px;
+}
+
+.renovaciones-facet-label {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+.renovaciones-facet-count {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.renovaciones-facet-monto {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.renovaciones-grupo {
+  margin-bottom: var(--space-4);
+}
+
+.renovaciones-grupo h2 {
+  margin: 0 0 var(--space-3) 0;
+  font-size: 1.05rem;
+}
+
+.renovaciones-nota {
+  margin: var(--space-3) 0 0 0;
+  font-size: 0.82rem;
+}
+
+.renovaciones-calidad-aviso {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}

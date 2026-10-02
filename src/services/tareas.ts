@@ -1,21 +1,31 @@
 import { apiClient } from "./client";
 import type {
   EstadoTarea,
+  OrigenTarea,
   PrioridadTarea,
+  ResumenCarteraMensual,
   Seguimiento,
   Tarea,
+  TareaCarteraMensual,
+  TareaListItem,
   TareaRenovacion,
+  TipoTarea,
 } from "../types/postventaCliente";
 
 export interface TareasQueryParams {
   numeroDocumentoCliente?: string;
   estado?: EstadoTarea;
   responsable?: string;
+  tipo?: TipoTarea;
+  origen?: OrigenTarea;
+  prioridad?: PrioridadTarea;
+  fechaDesde?: string;
+  fechaHasta?: string;
   vencidas?: boolean;
 }
 
-export async function getTareas(params: TareasQueryParams = {}): Promise<Tarea[]> {
-  const { data } = await apiClient.get<{ data: Tarea[] }>("/tareas", { params });
+export async function getTareas(params: TareasQueryParams = {}): Promise<TareaListItem[]> {
+  const { data } = await apiClient.get<{ data: TareaListItem[] }>("/tareas", { params });
   return data.data;
 }
 
@@ -27,6 +37,33 @@ export async function getTareasRenovacion(): Promise<TareaRenovacion[]> {
   return data.data;
 }
 
+// Reparto mensual de contactos — se genera/sincroniza al pedir esta lista
+// (mismo patron que renovacion), pero NUNCA desde GET /tareas general (ver
+// listTareas en el backend, ajustado por rendimiento).
+export async function getCarteraMensual(): Promise<{
+  resumen: ResumenCarteraMensual;
+  data: TareaCarteraMensual[];
+}> {
+  const { data } = await apiClient.get<{ resumen: ResumenCarteraMensual; data: TareaCarteraMensual[] }>(
+    "/tareas/reparto-mensual"
+  );
+  return data;
+}
+
+// Redistribucion explicita (nunca automatica) de las tareas de reparto
+// mensual que quedaron vencidas sin contactar — mueve su fecha_vencimiento
+// a los dias habiles que quedan del mes y registra un evento trazable por
+// cada una (ver TAREA_POSTERGADA en Historial de cambios).
+export async function redistribuirCarteraMensual(): Promise<{
+  redistribuidas: number;
+  sinDiasDisponibles: number;
+}> {
+  const { data } = await apiClient.post<{ redistribuidas: number; sinDiasDisponibles: number }>(
+    "/tareas/reparto-mensual/redistribuir"
+  );
+  return data;
+}
+
 export async function getTarea(id: number): Promise<Tarea> {
   const { data } = await apiClient.get<Tarea>(`/tareas/${id}`);
   return data;
@@ -35,6 +72,10 @@ export async function getTarea(id: number): Promise<Tarea> {
 export async function createTarea(input: {
   numeroDocumentoCliente: string;
   idOrdenServicio?: number | null;
+  tipo?: TipoTarea;
+  origen?: OrigenTarea;
+  origenEntidadTipo?: string | null;
+  origenEntidadId?: string | null;
   titulo: string;
   descripcion?: string | null;
   responsable: string;

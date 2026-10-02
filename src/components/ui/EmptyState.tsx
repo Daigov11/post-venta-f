@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import "./ui.css";
 
 export function EmptyState({
@@ -5,7 +6,7 @@ export function EmptyState({
   message,
 }: {
   title?: string;
-  message?: string;
+  message?: ReactNode;
 }) {
   return (
     <div className="empty-state">

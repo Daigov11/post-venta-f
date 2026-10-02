@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { BolsaEstadoWatcher } from "../bolsa/BolsaEstadoWatcher";
 import "./AppShell.css";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -11,6 +12,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Topbar />
         <main className="app-shell-content">{children}</main>
       </div>
+      <BolsaEstadoWatcher />
     </div>
   );
 }

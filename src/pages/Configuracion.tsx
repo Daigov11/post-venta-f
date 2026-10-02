@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Skeleton } from "../components/ui/Skeleton";
+import { useAuth } from "../context/AuthContext";
 import { useConfig } from "../hooks/useConfig";
 import { refreshPostVentaCache } from "../services/dashboard";
 import { updateConfig } from "../services/config";
@@ -8,6 +9,7 @@ import {
   type RefreshSystemUsersAllResult,
 } from "../services/clientes";
 import type { PostVentaConfigValues } from "../types/postventaCliente";
+import { UsuariosAutorizadosPanel } from "./configuracion/UsuariosAutorizadosPanel";
 import "./Configuracion.css";
 
 const CONFIG_FIELDS: {
@@ -154,6 +156,7 @@ const CONFIG_FIELDS: {
 ];
 
 export function ConfiguracionPage() {
+  const { rol } = useAuth();
   const { data, loading, error, refetch } = useConfig();
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -286,6 +289,8 @@ export function ConfiguracionPage() {
           )}
         </div>
       </div>
+
+      {rol === "ADMIN" && <UsuariosAutorizadosPanel />}
     </div>
   );
 }

@@ -8,11 +8,9 @@ import { agregarImagenes, extraerImagenesDePortapapeles, ImagenesPicker } from "
 import { uploadAdjuntos } from "../../services/adjuntos";
 import { updateClienteMetadata } from "../../services/clientes";
 import { getIncidencias } from "../../services/incidencias";
-import {
-  createIncidenciaManual,
-  getIncidenciasManuales,
-} from "../../services/incidenciasManuales";
+import { getIncidenciasManuales } from "../../services/incidenciasManuales";
 import { createInteres, setClienteIntereses } from "../../services/intereses";
+import { CrearIncidenciaDialog } from "./CrearIncidenciaDialog";
 import { createNota, getNotas } from "../../services/notas";
 import { createReunion, getDisponibilidad, updateReunionEstado } from "../../services/reuniones";
 import type {
@@ -43,6 +41,16 @@ function hoyIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Contexto puramente informativo de desde donde se abrio "Agendar/Interes" —
+// no se persiste en ningun lado nuevo, solo se muestra para que quede claro
+// por que se esta agendando (pedido de consolidacion de acciones por ⚙).
+export interface OrigenAccion {
+  modulo: string;
+  etiqueta: string;
+  entidadTipo?: string;
+  entidadId?: string | number;
+}
+
 export function InteresesReunionesPanel({
   numeroDocumentoCliente,
   idOrdenServicio,
@@ -52,6 +60,7 @@ export function InteresesReunionesPanel({
   catalogo,
   marcados,
   reuniones,
+  origen,
   onChanged,
 }: {
   numeroDocumentoCliente: string;
@@ -62,6 +71,7 @@ export function InteresesReunionesPanel({
   catalogo: InteresCatalogo[];
   marcados: number[];
   reuniones: Reunion[];
+  origen?: OrigenAccion;
   onChanged: () => void;
 }) {
   const [editingTelefono, setEditingTelefono] = useState(false);
@@ -156,18 +166,15 @@ export function InteresesReunionesPanel({
     }
   }
 
-  // Incidencias registradas a mano desde la app — separadas de las de arriba
-  // (esas vienen de APIWorking) porque todavia no se conecta el endpoint de
-  // creacion real (existe, se conecta mas adelante). Se cargan solas al
-  // abrir el panel, es una consulta local rapida, no una llamada externa.
+  // Historial de incidencias registradas A MANO antes de que existiera la
+  // creacion real (ver migracion/decision: "debe generar la incidencia" —
+  // el boton de aca ahora crea la incidencia REAL en APIWorking via
+  // CrearIncidenciaDialog, igual que en la ficha del cliente). Se sigue
+  // mostrando en modo solo-lectura para no perder el historial ya guardado,
+  // pero ya no se pueden crear incidencias manuales nuevas desde aca.
   const [incidenciasManuales, setIncidenciasManuales] = useState<IncidenciaManual[]>([]);
   const [loadingIncidenciasManuales, setLoadingIncidenciasManuales] = useState(false);
-  const [nuevaIncidenciaAbierta, setNuevaIncidenciaAbierta] = useState(false);
-  const [nuevaIncidenciaCaso, setNuevaIncidenciaCaso] = useState("");
-  const [nuevaIncidenciaTipo, setNuevaIncidenciaTipo] = useState("");
-  const [nuevaIncidenciaDescripcion, setNuevaIncidenciaDescripcion] = useState("");
-  const [nuevaIncidenciaImagenes, setNuevaIncidenciaImagenes] = useState<File[]>([]);
-  const [savingIncidenciaManual, setSavingIncidenciaManual] = useState(false);
+  const [crearIncidenciaAbierta, setCrearIncidenciaAbierta] = useState(false);
 
   useEffect(() => {
     setLoadingIncidenciasManuales(true);
@@ -175,39 +182,6 @@ export function InteresesReunionesPanel({
       .then(setIncidenciasManuales)
       .finally(() => setLoadingIncidenciasManuales(false));
   }, [numeroDocumentoCliente]);
-
-  function handlePasteIncidencia(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const pegadas = extraerImagenesDePortapapeles(event);
-    if (pegadas.length === 0) return;
-    event.preventDefault();
-    setNuevaIncidenciaImagenes((prev) => agregarImagenes(prev, pegadas).files);
-  }
-
-  async function handleRegistrarIncidencia(event: FormEvent) {
-    event.preventDefault();
-    if (!nuevaIncidenciaCaso.trim()) return;
-    setSavingIncidenciaManual(true);
-    try {
-      const creada = await createIncidenciaManual({
-        numeroDocumentoCliente,
-        idOrdenServicio,
-        caso: nuevaIncidenciaCaso.trim(),
-        tipo: nuevaIncidenciaTipo || null,
-        descripcion: nuevaIncidenciaDescripcion.trim() || null,
-      });
-      if (nuevaIncidenciaImagenes.length > 0) {
-        await uploadAdjuntos("INCIDENCIA_MANUAL", creada.id, nuevaIncidenciaImagenes);
-      }
-      setIncidenciasManuales((prev) => [creada, ...prev]);
-      setNuevaIncidenciaCaso("");
-      setNuevaIncidenciaTipo("");
-      setNuevaIncidenciaDescripcion("");
-      setNuevaIncidenciaImagenes([]);
-      setNuevaIncidenciaAbierta(false);
-    } finally {
-      setSavingIncidenciaManual(false);
-    }
-  }
 
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set(marcados));
   const [savingIntereses, setSavingIntereses] = useState(false);
@@ -401,6 +375,12 @@ export function InteresesReunionesPanel({
 
   return (
     <div className="stack-form">
+      {origen && (
+        <p className="muted" style={{ margin: 0 }}>
+          Agendando desde {origen.etiqueta}
+          {origen.entidadId ? ` — ${origen.entidadTipo ?? "referencia"} #${origen.entidadId}` : ""}
+        </p>
+      )}
       {telefono !== undefined && (
         <section>
           <h3 style={{ marginBottom: 4 }}>Teléfono de contacto</h3>
@@ -550,96 +530,51 @@ export function InteresesReunionesPanel({
       </section>
 
       <section>
-        <h3 style={{ marginBottom: 4 }}>
-          Incidencias registradas acá{incidenciasManuales.length > 0 ? ` (${incidenciasManuales.length})` : ""}
-        </h3>
+        <h3 style={{ marginBottom: 4 }}>Crear incidencia</h3>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-          Todavía no se conectó la creación directa en APIWorking — esto queda guardado en la app
-          mientras tanto.
+          Se crea directamente en APIWorking, sobre la orden de servicio vigente de este cliente —
+          aparecerá arriba, en "Incidencias", al refrescar.
         </p>
-        {loadingIncidenciasManuales && <p className="muted">Cargando...</p>}
-        {!loadingIncidenciasManuales && incidenciasManuales.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-            {incidenciasManuales.map((inc) => (
-              <div key={inc.id} style={{ fontSize: 13 }}>
-                <strong>{new Date(inc.createdAt).toLocaleDateString("es-PE")}</strong>
-                {" — "}
-                {inc.caso}
-                {inc.tipo && ` (${inc.tipo})`}
-                {inc.descripcion && (
-                  <div className="muted" style={{ marginTop: 2 }}>
-                    {inc.descripcion}
+        <button type="button" className="btn btn-primary" onClick={() => setCrearIncidenciaAbierta(true)}>
+          Crear incidencia
+        </button>
+        {crearIncidenciaAbierta && (
+          <CrearIncidenciaDialog
+            numeroDocumentoCliente={numeroDocumentoCliente}
+            onClose={() => setCrearIncidenciaAbierta(false)}
+            onCreada={handleVerIncidencias}
+          />
+        )}
+
+        {incidenciasManuales.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <h4 style={{ marginBottom: 4, fontSize: 13 }}>
+              Historial registrado acá antes ({incidenciasManuales.length})
+            </h4>
+            <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>
+              Registros locales de antes de que existiera la creación real en APIWorking — quedan
+              visibles para no perder el historial, pero ya no se crean nuevos así.
+            </p>
+            {loadingIncidenciasManuales && <p className="muted">Cargando...</p>}
+            {!loadingIncidenciasManuales && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {incidenciasManuales.map((inc) => (
+                  <div key={inc.id} style={{ fontSize: 13 }}>
+                    <strong>{new Date(inc.createdAt).toLocaleDateString("es-PE")}</strong>
+                    {" — "}
+                    {inc.caso}
+                    {inc.tipo && ` (${inc.tipo})`}
+                    {inc.descripcion && (
+                      <div className="muted" style={{ marginTop: 2 }}>
+                        {inc.descripcion}
+                      </div>
+                    )}
+                    <AdjuntosGaleria entidadTipo="INCIDENCIA_MANUAL" entidadId={inc.id} />
                   </div>
-                )}
-                <AdjuntosGaleria entidadTipo="INCIDENCIA_MANUAL" entidadId={inc.id} />
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-        {!nuevaIncidenciaAbierta && (
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setNuevaIncidenciaAbierta(true)}
-          >
-            Registrar incidencia
-          </button>
-        )}
-        {nuevaIncidenciaAbierta && (
-          <form onSubmit={handleRegistrarIncidencia} className="stack-form">
-            <div className="field">
-              <label htmlFor="incidencia-caso">Caso</label>
-              <input
-                id="incidencia-caso"
-                type="text"
-                value={nuevaIncidenciaCaso}
-                onChange={(e) => setNuevaIncidenciaCaso(e.target.value)}
-                required
-                autoFocus
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="incidencia-tipo">Tipo</label>
-              <select
-                id="incidencia-tipo"
-                value={nuevaIncidenciaTipo}
-                onChange={(e) => setNuevaIncidenciaTipo(e.target.value)}
-              >
-                <option value="">Sin especificar</option>
-                <option value="USUARIO NO MANDA DOCUMENTOS">Usuario no manda documentos</option>
-                <option value="DOCUMENTOS RECHAZADOS">Documentos rechazados</option>
-                <option value="COMPROBANTES SIN ENVIAR">Comprobantes sin enviar</option>
-                <option value="ERROR AL ENVIAR COMPROBANTES A SUNAT">
-                  Error al enviar comprobantes a SUNAT
-                </option>
-                <option value="SOPORTE TECNICO">Soporte técnico</option>
-                <option value="OTRO">Otro</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="incidencia-descripcion">Descripción</label>
-              <textarea
-                id="incidencia-descripcion"
-                rows={3}
-                value={nuevaIncidenciaDescripcion}
-                onChange={(e) => setNuevaIncidenciaDescripcion(e.target.value)}
-                onPaste={handlePasteIncidencia}
-              />
-            </div>
-            <ImagenesPicker files={nuevaIncidenciaImagenes} onChange={setNuevaIncidenciaImagenes} />
-            <div className="form-actions">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setNuevaIncidenciaAbierta(false)}
-              >
-                Cancelar
-              </button>
-              <button type="submit" className="btn btn-primary" disabled={savingIncidenciaManual}>
-                {savingIncidenciaManual ? "Guardando..." : "Guardar incidencia"}
-              </button>
-            </div>
-          </form>
         )}
       </section>
 

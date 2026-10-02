@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ColaUrgentePanel } from "../components/panels/ColaUrgentePanel";
+import { CollapsibleCard } from "../components/ui/CollapsibleCard";
 import { KpiCard } from "../components/ui/KpiCard";
 import { Skeleton } from "../components/ui/Skeleton";
+import { useAlertas } from "../hooks/useAlertas";
 import { useDashboardKpis } from "../hooks/useDashboardKpis";
+import { useHistoricoResultados } from "../hooks/useHistoricoResultados";
 import { useTareas } from "../hooks/useTareas";
 import { refreshPostVentaCache } from "../services/dashboard";
 import { formatCurrency, formatNumber } from "../utils/format";
@@ -18,14 +22,30 @@ function esHoyOAntes(fechaIso: string | null): boolean {
   return new Date(fechaIso) <= hoy;
 }
 
+function hoyISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function DashboardPage() {
   const { data, loading, error, refetch } = useDashboardKpis();
   // Sin filtro de "hoy" en el backend (no existe ese parametro en GET
   // /tareas) — se trae todo lo no cerrado y se acota en el cliente, mismo
   // patron que ya usan Renovaciones.tsx/Tareas.tsx para sus propios calculos.
   const { data: tareas, loading: loadingTareas, error: errorTareas } = useTareas({});
+  // Sin filtro por tipo (la API solo filtra a un tipo por request) — se trae
+  // todo lo abierto y se cuenta por tipo en el cliente, ver ColaUrgentePanel.
+  const { data: alertasData, loading: loadingAlertas, error: errorAlertas } = useAlertas({});
+  // Resultados y cierre diario (Fase 3) — todos los usuarios, solo hoy.
+  const hoy = hoyISO();
+  const { data: resultadosHoy, loading: loadingResultadosHoy } = useHistoricoResultados({
+    desde: hoy,
+    hasta: hoy,
+  });
+  const conversionesHoy = (resultadosHoy?.data ?? []).reduce((acc, r) => acc + r.totalConversiones, 0);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [senalesPendientesAbierto, setSenalesPendientesAbierto] = useState(false);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -91,18 +111,13 @@ export function DashboardPage() {
         <>
           <section className="dashboard-section" aria-labelledby="dash-prioridades">
             <h2 id="dash-prioridades">Prioridades de hoy</h2>
-            <div className="kpi-grid">
+            <ColaUrgentePanel alertas={alertasData?.data ?? null} loading={loadingAlertas} error={errorAlertas} />
+            <div className="kpi-grid dashboard-kpi-grid-secundario">
               <KpiCard
                 label="Alertas críticas"
                 value={formatNumber(data.alertasPorNivel.CRITICAL)}
                 tone={data.alertasPorNivel.CRITICAL > 0 ? "critical" : "success"}
                 hint="Ver detalle en Alertas"
-              />
-              <KpiCard
-                label="Incidencias sin resolver"
-                value="—"
-                tone="future"
-                hint="Próximamente · Fase 2 — depende del endpoint agregador de incidencias en APIWorking"
               />
               <KpiCard
                 label="Renovaciones próximas"
@@ -159,10 +174,9 @@ export function DashboardPage() {
                 hint="Vencimiento hoy o antes, sin cancelar — ver detalle en Tareas"
               />
               <KpiCard
-                label="Resumen de conversiones del día"
-                value="—"
-                tone="future"
-                hint="Próximamente · Fase 3 — depende del módulo Resultados y cierre diario"
+                label="Conversiones del día"
+                value={loadingResultadosHoy ? "—" : formatNumber(conversionesHoy)}
+                hint="Equipo + plan + módulo, todos los usuarios — ver detalle en Resultados"
               />
             </div>
           </section>
@@ -192,44 +206,53 @@ export function DashboardPage() {
                 label="Comprobantes históricos"
                 value={formatNumber(data.comprobantesHistoricoTotal)}
               />
+              <KpiCard label="Clientes con APILoyalty" value={formatNumber(data.clientesLoyalty)} />
             </div>
           </section>
 
           <section className="dashboard-section" aria-labelledby="dash-senales">
             <h2 id="dash-senales">Señales operativas</h2>
-            <div className="kpi-grid">
-              <KpiCard label="Clientes con APILoyalty" value={formatNumber(data.clientesLoyalty)} />
-              <KpiCard
-                label="Clientes Google"
-                value="—"
-                tone="pending"
-                hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
-              />
-              <KpiCard
-                label="Clientes con Pago QR"
-                value="—"
-                tone="pending"
-                hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
-              />
-              <KpiCard
-                label="Proyectado anual ya cobrado"
-                value="—"
-                tone="pending"
-                hint="Fuente pendiente de validación"
-              />
-              <KpiCard
-                label="Proyectado mensual ya cobrado"
-                value="—"
-                tone="pending"
-                hint="Fuente pendiente de validación"
-              />
-              <KpiCard
-                label="Proyectado semestral ya cobrado"
-                value="—"
-                tone="pending"
-                hint="Fuente pendiente de validación"
-              />
-            </div>
+            <CollapsibleCard
+              titulo="Métricas pendientes de definir fuente"
+              subtitulo="No se calculan todavía — no hay un campo de origen confirmado para ninguna"
+              abierto={senalesPendientesAbierto}
+              onToggle={() => setSenalesPendientesAbierto((v) => !v)}
+              contador={5}
+              tone="pending"
+            >
+              <div className="kpi-grid">
+                <KpiCard
+                  label="Clientes Google"
+                  value="—"
+                  tone="pending"
+                  hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
+                />
+                <KpiCard
+                  label="Clientes con Pago QR"
+                  value="—"
+                  tone="pending"
+                  hint="Fuente pendiente de validación — no existe un campo de origen para esto todavía"
+                />
+                <KpiCard
+                  label="Proyectado anual ya cobrado"
+                  value="—"
+                  tone="pending"
+                  hint="Fuente pendiente de validación"
+                />
+                <KpiCard
+                  label="Proyectado mensual ya cobrado"
+                  value="—"
+                  tone="pending"
+                  hint="Fuente pendiente de validación"
+                />
+                <KpiCard
+                  label="Proyectado semestral ya cobrado"
+                  value="—"
+                  tone="pending"
+                  hint="Fuente pendiente de validación"
+                />
+              </div>
+            </CollapsibleCard>
           </section>
         </>
       )}

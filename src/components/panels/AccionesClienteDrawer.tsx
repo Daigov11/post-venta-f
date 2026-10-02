@@ -1,4 +1,4 @@
-import { InteresesReunionesPanel } from "./InteresesReunionesPanel";
+import { InteresesReunionesPanel, type OrigenAccion } from "./InteresesReunionesPanel";
 import type { DataTableColumn } from "../ui/DataTable";
 import { Drawer } from "../ui/Drawer";
 import { Skeleton } from "../ui/Skeleton";
@@ -36,9 +36,11 @@ export function columnaAccionesCliente<T>(
 // cada apertura arranca su propio fetch.
 export function AccionesClienteDrawer({
   numeroDocumentoCliente,
+  origen,
   onClose,
 }: {
   numeroDocumentoCliente: string;
+  origen?: OrigenAccion;
   onClose: () => void;
 }) {
   const { data, loading, error, refetch } = useCliente(numeroDocumentoCliente);
@@ -57,6 +59,7 @@ export function AccionesClienteDrawer({
           catalogo={data.intereses.catalogo}
           marcados={data.intereses.marcados}
           reuniones={data.reuniones}
+          origen={origen}
           onChanged={refetch}
         />
       )}

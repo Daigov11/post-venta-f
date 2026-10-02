@@ -1,181 +1,104 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { NotaForm } from "../components/forms/NotaForm";
-import { SeguimientoForm } from "../components/forms/SeguimientoForm";
 import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
 import { InteresesReunionesPanel } from "../components/panels/InteresesReunionesPanel";
 import { SeguimientoPostVentaDrawer } from "../components/panels/SeguimientoPostVentaDrawer";
-import { AdjuntosGaleria } from "../components/ui/AdjuntosGaleria";
+import { ActionMenu } from "../components/ui/ActionMenu";
 import { Badge } from "../components/ui/Badge";
 import { Drawer } from "../components/ui/Drawer";
-import { EmptyState } from "../components/ui/EmptyState";
-import { LlamarButton } from "../components/ui/LlamarButton";
 import { Skeleton } from "../components/ui/Skeleton";
-import { EstadoPostVentaPill, NivelAlertaPill, SegmentoPill } from "../components/ui/StatusPill";
-import { WhatsAppButton } from "../components/ui/WhatsAppButton";
+import { EstadoPostVentaPill, SegmentoPill } from "../components/ui/StatusPill";
 import { useAuth } from "../context/AuthContext";
 import { useCliente } from "../hooks/useCliente";
-import { useSeguimientos } from "../hooks/useSeguimientos";
 import { uploadAdjuntos } from "../services/adjuntos";
 import { getCapacitaciones } from "../services/capacitaciones";
 import { refreshSystemUsersOne, updateClienteMetadata } from "../services/clientes";
 import { getHistorialSeguimiento } from "../services/historial";
 import { getIncidencias } from "../services/incidencias";
 import { createNota } from "../services/notas";
-import { createSeguimiento, createTarea, updateTarea } from "../services/tareas";
+import { createTarea } from "../services/tareas";
+import { buildContactoMenuItems } from "../utils/contactoMenuItems";
 import type {
   Capacitacion,
   EstadoPostVenta,
-  EstadoTarea,
   HistorialSeguimientoEvento,
   Incidencia,
-  Tarea,
 } from "../types/postventaCliente";
-import { formatCurrency, formatNumber, formatValorEstimado } from "../utils/format";
+import { CobranzaTab } from "./clienteFicha/CobranzaTab";
+import { HistorialTab } from "./clienteFicha/HistorialTab";
+import { IncidenciasTab, type FiltroIncidencias } from "./clienteFicha/IncidenciasTab";
+import { NotasTab } from "./clienteFicha/NotasTab";
+import { OportunidadesTab } from "./clienteFicha/OportunidadesTab";
+import { RenovacionTab } from "./clienteFicha/RenovacionTab";
+import { ResumenTab } from "./clienteFicha/ResumenTab";
+import { ServiciosTab } from "./clienteFicha/ServiciosTab";
+import { TareasTab } from "./clienteFicha/TareasTab";
 import "./ClienteFicha.css";
 
-const ESTADO_TAREA_LABEL: Record<EstadoTarea, string> = {
-  PENDIENTE: "Pendiente",
-  EN_PROCESO: "En proceso",
-  ESPERANDO_CLIENTE: "Esperando cliente",
-  COMPLETADA: "Completada",
-  CANCELADA: "Cancelada",
-};
+// Orden y nombres pedidos en la limpieza visual de Fase 1: resumen, cobranza,
+// servicios, incidencias, renovación, tareas, oportunidades, contactos/notas
+// e historial — cada uno su propia pestaña, sin mezclar incidencias externas
+// con notas/tareas internas. Antes "Resumen" repartia estas mismas secciones
+// en 3 bloques no contiguos del archivo; esto es reordenamiento puro, ningun
+// dato ni calculo cambio.
+type FichaTab =
+  | "resumen"
+  | "cobranza"
+  | "servicios"
+  | "incidencias"
+  | "renovacion"
+  | "tareas"
+  | "oportunidades"
+  | "notas"
+  | "historial";
 
-// El historial de seguimiento trae ~30 nestado distintos, propios del motor
-// de estados interno de APIWorking — no tenemos un catalogo confiable de que
-// significa cada uno. Solo se colorean los 2 que ya usamos en otro lado de la
-// app con ese mismo significado (esProblema en Renovaciones usa literalmente
-// "SUSPENDIDO POR PAGO"); el resto queda neutral en vez de inventar semántica.
-function HistorialEstadoBadge({ estado }: { estado: string }) {
-  if (estado === "SUSPENDIDO POR PAGO") return <Badge tone="critical">{estado}</Badge>;
-  if (estado === "COBRANZA") return <Badge tone="success">{estado}</Badge>;
-  return <Badge tone="neutral">{estado || "Sin estado"}</Badge>;
-}
+const FICHA_TABS_VALIDAS: FichaTab[] = [
+  "resumen",
+  "cobranza",
+  "servicios",
+  "incidencias",
+  "renovacion",
+  "tareas",
+  "oportunidades",
+  "notas",
+  "historial",
+];
 
-function IncidenciaEstadoBadge({ resuelta }: { resuelta: boolean }) {
-  return resuelta ? (
-    <Badge tone="success">Resuelta</Badge>
-  ) : (
-    <Badge tone="warning">Abierta</Badge>
-  );
-}
-
-// Distingue visualmente datos que vienen de APIWorking (fuente externa, solo
-// lectura) de trabajo propio de la plataforma — ver Especificaciones
-// Postventa v2 / Handoff Postventa. Icono + texto siempre, nunca solo color.
-function SourceTag({ origen }: { origen: "apiworking" | "local" }) {
-  return origen === "apiworking" ? (
-    <Badge tone="info">🌐 APIWorking</Badge>
-  ) : (
-    <Badge tone="local">🗂️ Plataforma local</Badge>
-  );
-}
-
-function SectionHeader({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-      {children}
-    </div>
-  );
-}
-
-type FichaTab = "resumen" | "actividad" | "historial" | "notas";
-
-function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const { data: seguimientos, loading, refetch } = useSeguimientos(tarea.id, expanded);
-  const [addingSeguimiento, setAddingSeguimiento] = useState(false);
-  const [updatingEstado, setUpdatingEstado] = useState(false);
-
-  async function handleAddSeguimiento(comentario: string, imagenes: File[]) {
-    setAddingSeguimiento(true);
-    try {
-      const creado = await createSeguimiento(tarea.id, comentario);
-      if (imagenes.length > 0) {
-        await uploadAdjuntos("TAREA_SEGUIMIENTO", creado.id, imagenes);
-      }
-      refetch();
-    } finally {
-      setAddingSeguimiento(false);
-    }
-  }
-
-  async function handleEstadoChange(estado: EstadoTarea) {
-    setUpdatingEstado(true);
-    try {
-      await updateTarea(tarea.id, { estado });
-      onChanged();
-    } finally {
-      setUpdatingEstado(false);
-    }
-  }
-
-  return (
-    <div className="tarea-item">
-      <div className="tarea-item-header">
-        <div>
-          <div className="tarea-item-title">{tarea.titulo}</div>
-          <div className="tarea-item-meta">
-            {tarea.responsable} · Prioridad {tarea.prioridad}
-            {tarea.fechaVencimiento ? ` · Vence ${tarea.fechaVencimiento}` : ""}
-          </div>
-        </div>
-        <select
-          value={tarea.estado}
-          disabled={updatingEstado}
-          onChange={(event) => handleEstadoChange(event.target.value as EstadoTarea)}
-        >
-          {Object.entries(ESTADO_TAREA_LABEL).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
-      {tarea.descripcion && <p className="muted">{tarea.descripcion}</p>}
-      <button type="button" className="btn btn-ghost" onClick={() => setExpanded((v) => !v)}>
-        {expanded ? "Ocultar seguimientos" : "Ver seguimientos"}
-      </button>
-      {expanded && (
-        <>
-          {loading && <Skeleton height={40} />}
-          <div className="seguimientos-list">
-            {seguimientos && seguimientos.length === 0 && (
-              <span className="muted">Sin seguimientos todavía.</span>
-            )}
-            {seguimientos?.map((s) => (
-              <div key={s.id} className="seguimiento-item">
-                <div>{s.comentario}</div>
-                <div className="seguimiento-item-meta">
-                  {s.usuario} · {new Date(s.createdAt).toLocaleString("es-PE")}
-                </div>
-                <AdjuntosGaleria entidadTipo="TAREA_SEGUIMIENTO" entidadId={s.id} />
-              </div>
-            ))}
-          </div>
-          <SeguimientoForm onSubmit={handleAddSeguimiento} submitting={addingSeguimiento} />
-        </>
-      )}
-    </div>
-  );
-}
+const TABS: { value: FichaTab; label: (counts: { tareas: number; notas: number }) => string }[] = [
+  { value: "resumen", label: () => "Resumen" },
+  { value: "cobranza", label: () => "Cobranza" },
+  { value: "servicios", label: () => "Servicios" },
+  { value: "incidencias", label: () => "Incidencias" },
+  { value: "renovacion", label: () => "Renovación" },
+  { value: "tareas", label: (c) => `Tareas (${c.tareas})` },
+  { value: "oportunidades", label: () => "Oportunidades" },
+  { value: "notas", label: (c) => `Notas y contactos (${c.notas})` },
+  { value: "historial", label: () => "Historial" },
+];
 
 export function ClienteFichaPage() {
   const navigate = useNavigate();
   const { numeroDocumentoCliente = "" } = useParams();
   const { username } = useAuth();
   const { data, loading, error, refetch } = useCliente(numeroDocumentoCliente);
-  const [tab, setTab] = useState<FichaTab>("resumen");
+  const [searchParams] = useSearchParams();
+  const tabInicial = searchParams.get("tab");
+  const [tab, setTab] = useState<FichaTab>(
+    tabInicial && FICHA_TABS_VALIDAS.includes(tabInicial as FichaTab) ? (tabInicial as FichaTab) : "resumen"
+  );
   const [notaDrawerOpen, setNotaDrawerOpen] = useState(false);
   const [tareaDrawerOpen, setTareaDrawerOpen] = useState(false);
   // Prefill del formulario de tarea — vacio (solo responsable) desde el
   // boton genérico de la cabecera, o con título/descripción de una
-  // incidencia puntual cuando se crea desde esa fila (ver sección
-  // Incidencias más abajo). Hallazgo de la auditoría de Fase 1: antes "Crear
-  // tarea" era siempre genérico, sin enlace real a la incidencia que lo
-  // origina.
+  // incidencia puntual cuando se crea desde esa fila (ver pestaña
+  // Incidencias). Hallazgo de la auditoría de Fase 1: antes "Crear tarea"
+  // era siempre genérico, sin enlace real a la incidencia que lo origina —
+  // tareaDesdeIncidencia guarda esa incidencia puntual para que
+  // handleAddTarea pueda mandar origen=INCIDENCIA + la referencia real
+  // (origenEntidadId), no solo texto libre en el título.
   const [tareaInicial, setTareaInicial] = useState<Partial<TareaFormValues>>({});
+  const [tareaDesdeIncidencia, setTareaDesdeIncidencia] = useState<Incidencia | null>(null);
   const [interesesDrawerOpen, setInteresesDrawerOpen] = useState(false);
   const [seguimientoPvDrawerOpen, setSeguimientoPvDrawerOpen] = useState(false);
   const [savingNota, setSavingNota] = useState(false);
@@ -203,9 +126,7 @@ export function ClienteFichaPage() {
   } | null>(null);
   const [loadingIncidencias, setLoadingIncidencias] = useState(false);
   const [errorIncidencias, setErrorIncidencias] = useState<string | null>(null);
-  const [filtroIncidencias, setFiltroIncidencias] = useState<"todas" | "abiertas" | "resueltas">(
-    "todas"
-  );
+  const [filtroIncidencias, setFiltroIncidencias] = useState<FiltroIncidencias>("todas");
 
   // A diferencia de incidencias (llamada en vivo a APIWorking, cara, se pide
   // solo si el usuario hace clic), capacitaciones ya viene precalculado por
@@ -264,12 +185,22 @@ export function ClienteFichaPage() {
 
   // Se resetea al cambiar de cliente para no arrastrar el historial del
   // anterior mientras carga el nuevo (el fetch es manual, no automatico).
+  // La pestaña NO se resetea en el montaje inicial (comparando contra el
+  // cliente anterior, no contando invocaciones — React.StrictMode corre
+  // este efecto 2 veces seguidas en dev y un simple "primera vez" se
+  // dispara igual en la segunda) para no pisar el ?tab= inicial de la URL
+  // (usado por "Ver oportunidades"/"Ver estado de renovación" desde otros
+  // modulos) — si cambia a otro cliente despues, ahi si vuelve a "resumen".
+  const clienteAnteriorRef = useRef<string | null>(null);
   useEffect(() => {
     setHistorial(null);
     setErrorHistorial(null);
     setIncidenciasResp(null);
     setErrorIncidencias(null);
-    setTab("resumen");
+    if (clienteAnteriorRef.current !== null && clienteAnteriorRef.current !== numeroDocumentoCliente) {
+      setTab("resumen");
+    }
+    clienteAnteriorRef.current = numeroDocumentoCliente;
     setEditingTelefono(false);
   }, [numeroDocumentoCliente]);
 
@@ -311,6 +242,10 @@ export function ClienteFichaPage() {
     try {
       await createTarea({
         numeroDocumentoCliente,
+        tipo: values.tipo,
+        origen: tareaDesdeIncidencia ? "INCIDENCIA" : "FICHA_CLIENTE",
+        origenEntidadTipo: tareaDesdeIncidencia ? "INCIDENCIA" : null,
+        origenEntidadId: tareaDesdeIncidencia ? String(tareaDesdeIncidencia.idIncidencia) : null,
         titulo: values.titulo,
         descripcion: values.descripcion || null,
         responsable: values.responsable,
@@ -318,10 +253,22 @@ export function ClienteFichaPage() {
         fechaVencimiento: values.fechaVencimiento || null,
       });
       setTareaDrawerOpen(false);
+      setTareaDesdeIncidencia(null);
       refetch();
     } finally {
       setSavingTarea(false);
     }
+  }
+
+  function handleCrearTareaDesdeIncidencia(inc: Incidencia) {
+    setTareaDesdeIncidencia(inc);
+    setTareaInicial({
+      titulo: `Seguimiento incidencia: ${inc.tipo || "Sin tipo"}`,
+      descripcion: inc.caso || inc.descripcion || "",
+      responsable: username ?? "",
+      tipo: "SOPORTE",
+    });
+    setTareaDrawerOpen(true);
   }
 
   if (loading && !data) {
@@ -348,11 +295,6 @@ export function ClienteFichaPage() {
   // Defensivo: mismo caso que sistemas (ver SistemasBadges) — en produccion
   // se vio undefined para algun cliente pese al tipo no-nullable.
   const usuarios = cliente.usuarios ?? [];
-  const incidenciasFiltradas = (incidenciasResp?.data ?? []).filter((inc) => {
-    if (filtroIncidencias === "abiertas") return !inc.resuelta;
-    if (filtroIncidencias === "resueltas") return inc.resuelta;
-    return true;
-  });
   const ultimoPago = cliente.ordenVigente.pagos
     .filter((p) => p.fechaEmitido !== null)
     .reduce<(typeof cliente.ordenVigente.pagos)[number] | null>(
@@ -386,6 +328,8 @@ export function ClienteFichaPage() {
       setLoadingIncidencias(false);
     }
   }
+
+  const counts = { tareas: tareas.length, notas: notas.length };
 
   return (
     <div>
@@ -462,960 +406,137 @@ export function ClienteFichaPage() {
           </div>
         </div>
         <div className="ficha-quick-actions">
-          {telefonoLimpio && (
-            <LlamarButton
-              numeroDocumentoCliente={cliente.numeroDocumentoCliente}
-              idOrdenServicio={cliente.ordenVigente.idOrdenServicio}
-              telefonoLimpio={telefonoLimpio}
-            />
-          )}
-          {telefonoLimpio && (
-            <WhatsAppButton
-              numeroDocumentoCliente={cliente.numeroDocumentoCliente}
-              idOrdenServicio={cliente.ordenVigente.idOrdenServicio}
-              telefonoLimpio={telefonoLimpio}
-            />
-          )}
-          {cliente.ordenVigente.linkSistema && (
-            <a
-              className="btn btn-secondary"
-              href={cliente.ordenVigente.linkSistema}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Abrir sistema
-            </a>
-          )}
-          <button type="button" className="btn btn-secondary" onClick={() => setNotaDrawerOpen(true)}>
-            Registrar nota
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => {
-              setTareaInicial({ responsable: username ?? "" });
-              setTareaDrawerOpen(true);
-            }}
-          >
-            Crear tarea
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => setInteresesDrawerOpen(true)}
-          >
-            Intereses y reuniones
-          </button>
+          <ActionMenu
+            label={`Acciones para ${cliente.nombreCliente}`}
+            items={[
+              { key: "intereses", label: "Intereses y reuniones", onSelect: () => setInteresesDrawerOpen(true) },
+              ...buildContactoMenuItems({
+                numeroDocumentoCliente: cliente.numeroDocumentoCliente,
+                idOrdenServicio: cliente.ordenVigente.idOrdenServicio,
+                telefonoLimpio,
+              }),
+              ...(cliente.ordenVigente.linkSistema
+                ? [{ key: "abrir-sistema", label: "Abrir sistema", href: cliente.ordenVigente.linkSistema, target: "_blank" }]
+                : []),
+              { key: "registrar-nota", label: "Registrar nota", onSelect: () => setNotaDrawerOpen(true) },
+              {
+                key: "crear-tarea",
+                label: "Crear tarea",
+                onSelect: () => {
+                  setTareaDesdeIncidencia(null);
+                  setTareaInicial({ responsable: username ?? "", tipo: "SEGUIMIENTO" });
+                  setTareaDrawerOpen(true);
+                },
+              },
+            ]}
+          />
         </div>
       </div>
 
       <div className="clientes-toolbar" style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={tab === "resumen" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setTab("resumen")}
-          >
-            Resumen
-          </button>
-          <button
-            type="button"
-            className={tab === "actividad" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setTab("actividad")}
-          >
-            Actividad y seguimiento
-          </button>
-          <button
-            type="button"
-            className={tab === "historial" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setTab("historial")}
-          >
-            Historial
-          </button>
-          <button
-            type="button"
-            className={tab === "notas" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setTab("notas")}
-          >
-            Notas y tareas ({tareas.length + notas.length})
-          </button>
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              className={tab === t.value ? "btn btn-primary" : "btn btn-secondary"}
+              onClick={() => setTab(t.value)}
+            >
+              {t.label(counts)}
+            </button>
+          ))}
         </div>
       </div>
 
       {tab === "resumen" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section">
-          <h2>Resumen</h2>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">OS vigente</span>
-              <span className="ficha-field-value">{cliente.ordenVigente.numeroOs}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Fecha OS</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.fechaOs
-                  ? new Date(cliente.ordenVigente.fechaOs).toLocaleDateString("es-PE")
-                  : "No determinado"}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Ubicación</span>
-              <span className="ficha-field-value">
-                {cliente.ubicacion && "departamento" in cliente.ubicacion
-                  ? `${cliente.ubicacion.distrito}, ${cliente.ubicacion.provincia}, ${cliente.ubicacion.departamento}`
-                  : cliente.ubicacion?.raw ?? "No determinado"}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Rubro</span>
-              <span className="ficha-field-value">{cliente.rubro}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Ejecutivo</span>
-              <span className="ficha-field-value">{cliente.ordenVigente.ejecutivo ?? "—"}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Vendedor/Distribuidor</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.distribuidor?.nombre ?? "—"}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="card ficha-section">
-          <h2>Plan</h2>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Plan</span>
-              <span className="ficha-field-value">{cliente.planActual.nombre}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Periodicidad</span>
-              <span className="ficha-field-value">{cliente.planActual.periodicidad}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Pago proyectado anual</span>
-              <span className="ficha-field-value">
-                {formatValorEstimado(cliente.planActual.precioAnualProyectado)}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Tipo OS</span>
-              <span className="ficha-field-value">{cliente.ordenVigente.tipoOS || "—"}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Próxima renovación</span>
-              <span className="ficha-field-value">
-                {cliente.proximaRenovacion ? (
-                  <>
-                    {new Date(cliente.proximaRenovacion).toLocaleDateString("es-PE")}
-                    {cliente.diasParaRenovacion !== null && (
-                      <>
-                        {" "}
-                        ·{" "}
-                        {cliente.diasParaRenovacion < 0 ? (
-                          <Badge tone="critical">Vencida</Badge>
-                        ) : (
-                          <Badge tone={cliente.diasParaRenovacion <= 7 ? "warning" : "neutral"}>
-                            Faltan {cliente.diasParaRenovacion} día(s)
-                          </Badge>
-                        )}
-                      </>
-                    )}
-                  </>
-                ) : (
-                  "No determinado"
-                )}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="card ficha-section">
-          <h2>Sistema</h2>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Link sistema</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.linkSistema ? (
-                  <a href={cliente.ordenVigente.linkSistema} target="_blank" rel="noreferrer">
-                    Abrir
-                  </a>
-                ) : (
-                  "—"
-                )}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Fecha inicio</span>
-              <span className="ficha-field-value">
-                {cliente.fechaInicioCliente
-                  ? new Date(cliente.fechaInicioCliente).toLocaleDateString("es-PE")
-                  : "No determinado"}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Antigüedad</span>
-              <span className="ficha-field-value">{cliente.antiguedad.texto}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Comprobantes históricos</span>
-              <span className="ficha-field-value">
-                {formatNumber(cliente.cantidadComprobantesHistorico)}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="card ficha-section">
-          <h2>Facturación y SUNAT</h2>
-          {cliente.ordenVigente.postVentaExtra ? (
-            <div className="ficha-field-list">
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Nombre comercial</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nombreComercial ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Ingresos mensuales</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.ingresosClienteMensual === null
-                    ? "No determinado"
-                    : formatCurrency(cliente.ordenVigente.postVentaExtra.ingresosClienteMensual)}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Comprobantes mensuales</span>
-                <span className="ficha-field-value">
-                  {formatNumber(cliente.ordenVigente.postVentaExtra.cantidadComprobantesMensual)}
-                  {" "}
-                  (BV {cliente.ordenVigente.postVentaExtra.comprobantesMensualDesglose.bv} · FV{" "}
-                  {cliente.ordenVigente.postVentaExtra.comprobantesMensualDesglose.fv} · NV{" "}
-                  {cliente.ordenVigente.postVentaExtra.comprobantesMensualDesglose.nv} · Otros{" "}
-                  {cliente.ordenVigente.postVentaExtra.comprobantesMensualDesglose.otros})
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Ciclo de facturación</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nCicloFacturacion ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Suspendido</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.suspendido ? (
-                    <Badge tone="critical">Sí</Badge>
-                  ) : (
-                    <Badge tone="success">No</Badge>
-                  )}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Estado sistema</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nEstadoSistema ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Estado SUNAT</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nEstadoSunat ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Afiliado SUNAT</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nAfiliadoSunat ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Capacitado</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.nEstadoCapacitado ?? "—"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Fecha de activación</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.fechaActivacion
-                    ? new Date(cliente.ordenVigente.postVentaExtra.fechaActivacion).toLocaleDateString(
-                        "es-PE"
-                      )
-                    : "No determinado"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Vencimiento certificado</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.fechaVencimientoCertificado
-                    ? new Date(
-                        cliente.ordenVigente.postVentaExtra.fechaVencimientoCertificado
-                      ).toLocaleDateString("es-PE")
-                    : "No determinado"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Fecha de instalación</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.fechaInstalacion
-                    ? new Date(cliente.ordenVigente.postVentaExtra.fechaInstalacion).toLocaleDateString(
-                        "es-PE"
-                      )
-                    : "No determinado"}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Instalado</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.instalado ? (
-                    <Badge tone="success">Sí</Badge>
-                  ) : (
-                    <Badge tone="neutral">No</Badge>
-                  )}
-                </span>
-              </div>
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Duración del ciclo (meses)</span>
-                <span className="ficha-field-value">
-                  {cliente.ordenVigente.postVentaExtra.meses ?? "No determinado"}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <EmptyState message="Esta orden de servicio es anterior al rango disponible del endpoint de facturación (25-09-2022) o todavía no aparece en el último sync." />
-          )}
-        </section>
-
-        <section className="card ficha-section">
-          <h2>Equipo</h2>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Tiene equipo</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.existeEquipo ? (
-                  <Badge tone="success">Sí</Badge>
-                ) : (
-                  <Badge tone="neutral">No</Badge>
-                )}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">ID equipo</span>
-              <span className="ficha-field-value">{cliente.ordenVigente.idEquipo ?? "—"}</span>
-            </div>
-          </div>
-        </section>
-      </div>
+        <ResumenTab
+          cliente={cliente}
+          alertas={alertas}
+          estadoManual={estadoManual}
+          onEstadoManualChange={setEstadoManual}
+          segmentoManual={segmentoManual}
+          onSegmentoManualChange={setSegmentoManual}
+          etiquetasText={etiquetasText}
+          onEtiquetasTextChange={setEtiquetasText}
+          observacionGeneral={observacionGeneral}
+          onObservacionGeneralChange={setObservacionGeneral}
+          savingMetadata={savingMetadata}
+          onSaveMetadata={handleSaveMetadata}
+        />
       )}
 
-      {tab === "actividad" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section">
-          <h2>Trabajadores</h2>
-          <p className="muted">Aproximado por los usuarios registrados en el sistema del cliente.</p>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">N° de trabajadores</span>
-              <span className="ficha-field-value">
-                {cliente.cantidadTrabajadores === null
-                  ? "Sin datos"
-                  : formatNumber(cliente.cantidadTrabajadores)}
-              </span>
-            </div>
-            {cliente.cantidadTrabajadoresActualizadoEn && (
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Actualizado</span>
-                <span className="ficha-field-value">
-                  {new Date(cliente.cantidadTrabajadoresActualizadoEn).toLocaleString("es-PE")}
-                </span>
-              </div>
-            )}
-          </div>
+      {tab === "cobranza" && <CobranzaTab cliente={cliente} ultimoPago={ultimoPago} />}
 
-          {usuarios.length > 0 && (
-            <div className="usuarios-list">
-              {usuarios.map((usuario) => (
-                <div key={usuario} className="usuarios-list-item">
-                  <code>{usuario}</code>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    onClick={() => handleCopiar(usuario, usuario)}
-                  >
-                    {usuarioCopiado === usuario ? "Copiado ✓" : "Copiar"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+      {tab === "servicios" && <ServiciosTab cliente={cliente} />}
 
-          <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 8 }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleRefreshTrabajadores}
-              disabled={refreshingTrabajadores || !cliente.ordenVigente.linkSistema}
-            >
-              {refreshingTrabajadores ? "Actualizando..." : "Actualizar"}
-            </button>
-            {usuarios.length > 0 && (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => handleCopiar(usuarios.join("\n"), "__todos__")}
-              >
-                {usuarioCopiado === "__todos__" ? "Copiado ✓" : "Copiar todos"}
-              </button>
-            )}
-          </div>
-        </section>
-
-        <section className="card ficha-section">
-          <h2>Actividad del sistema</h2>
-          <p className="muted">Último ingreso registrado por el cliente en su sistema.</p>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Último ingreso</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.postVentaExtra?.fechaInactivo
-                  ? new Date(cliente.ordenVigente.postVentaExtra.fechaInactivo).toLocaleString(
-                      "es-PE"
-                    )
-                  : "Sin datos"}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Hace</span>
-              <span className="ficha-field-value">
-                {cliente.diasSinActividad === null ? (
-                  "Sin datos"
-                ) : cliente.diasSinActividad <= 7 ? (
-                  <Badge tone="success">{cliente.diasSinActividad} día(s)</Badge>
-                ) : cliente.diasSinActividad <= 30 ? (
-                  <Badge tone="neutral">{cliente.diasSinActividad} día(s)</Badge>
-                ) : (
-                  <Badge tone="warning">{cliente.diasSinActividad} día(s)</Badge>
-                )}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        {seguimientoPostVenta && (
-          <section className="card ficha-section">
-            <h2>Seguimiento Post Venta</h2>
-            <p className="muted">
-              Onboarding de cliente recién capacitado ({seguimientoPostVenta.origen === "AUTOMATICO" ? "flujo automático" : "importado del Excel de Ligia"}).
-            </p>
-            <div className="ficha-field-list">
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Estado</span>
-                <span className="ficha-field-value">
-                  <Badge
-                    tone={
-                      seguimientoPostVenta.estadoPipeline === "EXITOSO"
-                        ? "success"
-                        : seguimientoPostVenta.estadoPipeline === "REQUIERE_ATENCION"
-                          ? "critical"
-                          : "neutral"
-                    }
-                  >
-                    {seguimientoPostVenta.estadoPipeline === "EXITOSO"
-                      ? "Cliente exitoso"
-                      : seguimientoPostVenta.estadoPipeline === "REQUIERE_ATENCION"
-                        ? "Requiere atención"
-                        : "En proceso"}
-                  </Badge>
-                </span>
-              </div>
-              {seguimientoPostVenta.etapaActual && (
-                <div className="ficha-field-row">
-                  <span className="ficha-field-label">Etapa actual</span>
-                  <span className="ficha-field-value">
-                    {seguimientoPostVenta.etapaActual.label}
-                    {seguimientoPostVenta.etapaActual.vencida && (
-                      <>
-                        {" "}
-                        <Badge tone="warning">Toca contactar</Badge>
-                      </>
-                    )}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 8 }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setSeguimientoPvDrawerOpen(true)}
-              >
-                Ver / registrar seguimiento
-              </button>
-            </div>
-          </section>
-        )}
-      </div>
+      {tab === "incidencias" && (
+        <IncidenciasTab
+          numeroDocumentoCliente={cliente.numeroDocumentoCliente}
+          incidenciasResp={incidenciasResp}
+          loading={loadingIncidencias}
+          error={errorIncidencias}
+          filtro={filtroIncidencias}
+          onFiltroChange={setFiltroIncidencias}
+          onCargar={handleCargarIncidencias}
+          onCrearTareaDesdeIncidencia={handleCrearTareaDesdeIncidencia}
+        />
       )}
 
-      {tab === "resumen" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section">
-          <h2>Financiero</h2>
-          <div className="ficha-field-list">
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Deuda OS vigente</span>
-              <span className="ficha-field-value">{formatCurrency(cliente.ordenVigente.deuda)}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Deuda total (todas las OS)</span>
-              <span className="ficha-field-value">{formatCurrency(cliente.deudaTotal)}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Deuda proyectada</span>
-              <span className="ficha-field-value">
-                {formatCurrency(cliente.ordenVigente.deudaProyectada)}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Facturas disponibles</span>
-              <span className="ficha-field-value">{cliente.ordenVigente.facturas.disponibles}</span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Facturas de equipo disponibles</span>
-              <span className="ficha-field-value">
-                {cliente.ordenVigente.facturas.equipoDisponibles}
-              </span>
-            </div>
-            <div className="ficha-field-row">
-              <span className="ficha-field-label">Último vencimiento de pago</span>
-              <span className="ficha-field-value">
-                {cliente.ultimoVencimientoPago
-                  ? new Date(cliente.ultimoVencimientoPago).toLocaleDateString("es-PE")
-                  : "Sin vencimientos todavía"}
-              </span>
-            </div>
-            {ultimoPago && (
-              <div className="ficha-field-row">
-                <span className="ficha-field-label">Última factura ({ultimoPago.nroComprobante})</span>
-                <span className="ficha-field-value">
-                  {ultimoPago.fechaEmitido
-                    ? new Date(ultimoPago.fechaEmitido).toLocaleDateString("es-PE")
-                    : "s/f"}{" "}
-                  ·{" "}
-                  {ultimoPago.deuda > 0 ? (
-                    <Badge tone="critical">Debe {formatCurrency(ultimoPago.deuda)}</Badge>
-                  ) : (
-                    <Badge tone="success">Pagada</Badge>
-                  )}
-                </span>
-              </div>
-            )}
-          </div>
-        </section>
+      {tab === "renovacion" && <RenovacionTab cliente={cliente} />}
 
-        <section className="card ficha-section">
-          <h2>Documentación</h2>
-          <div className="ficha-progress-track">
-            <div
-              className="ficha-progress-fill"
-              style={{ width: `${cliente.documentacionGlobal.porcentaje}%` }}
-            />
-          </div>
-          <p className="muted" style={{ marginTop: 8 }}>
-            {cliente.documentacionGlobal.disponibles}/{cliente.documentacionGlobal.total} documentos
-            ({cliente.documentacionGlobal.porcentaje}%)
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-            {cliente.documentacionGlobal.detalle.map((d) => (
-              <Badge key={d.clave} tone={d.disponible ? "success" : "critical"}>
-                {d.disponible ? "✓" : "✗"} {d.etiqueta}
-              </Badge>
-            ))}
-          </div>
-        </section>
+      {tab === "tareas" && <TareasTab tareas={tareas} onChanged={refetch} />}
 
-        <section className="card ficha-section">
-          <h2>Gestión Post Venta</h2>
-          <form className="stack-form" onSubmit={handleSaveMetadata}>
-            <div className="field">
-              <label htmlFor="estado-manual">Estado (override manual)</label>
-              <select
-                id="estado-manual"
-                value={estadoManual}
-                onChange={(event) => setEstadoManual(event.target.value as EstadoPostVenta | "")}
-              >
-                <option value="">Automático ({cliente.estadoPostVenta})</option>
-                <option value="NORMAL">Normal</option>
-                <option value="REVISAR">Revisar</option>
-                <option value="ATENCION">Atención</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="segmento-manual">
-                Segmento (override manual)
-                {cliente.segmentoCalculado && (
-                  <span className="muted"> — calculado: {cliente.segmentoCalculado}</span>
-                )}
-              </label>
-              <select
-                id="segmento-manual"
-                value={segmentoManual}
-                onChange={(event) => setSegmentoManual(event.target.value)}
-              >
-                <option value="">
-                  Automático {cliente.segmentoCalculado ? `(${cliente.segmentoCalculado})` : "(sin evaluar)"}
-                </option>
-                <option value="DIAMANTE">Diamante</option>
-                <option value="ORO">Oro</option>
-                <option value="PLATA">Plata</option>
-                <option value="CRITICO">Crítico</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="etiquetas">Etiquetas (separadas por coma)</label>
-              <input
-                id="etiquetas"
-                value={etiquetasText}
-                onChange={(event) => setEtiquetasText(event.target.value)}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="observacion-general">Observación general</label>
-              <textarea
-                id="observacion-general"
-                rows={3}
-                value={observacionGeneral}
-                onChange={(event) => setObservacionGeneral(event.target.value)}
-              />
-            </div>
-            <div className="form-actions">
-              <button type="submit" className="btn btn-primary" disabled={savingMetadata}>
-                {savingMetadata ? "Guardando..." : "Guardar"}
-              </button>
-            </div>
-          </form>
-        </section>
-      </div>
+      {tab === "oportunidades" && <OportunidadesTab oportunidades={oportunidades} />}
+
+      {tab === "notas" && (
+        <NotasTab
+          notas={notas}
+          usuarios={usuarios}
+          cantidadTrabajadores={cliente.cantidadTrabajadores}
+          cantidadTrabajadoresActualizadoEn={cliente.cantidadTrabajadoresActualizadoEn}
+          linkSistema={cliente.ordenVigente.linkSistema}
+          refreshingTrabajadores={refreshingTrabajadores}
+          onRefreshTrabajadores={handleRefreshTrabajadores}
+          usuarioCopiado={usuarioCopiado}
+          onCopiar={handleCopiar}
+        />
       )}
 
       {tab === "historial" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section">
-          <h2>Datos aún no disponibles</h2>
-          <EmptyState message="Módulos y encuestas quedarán disponibles cuando APIWorking entregue los endpoints correspondientes. Último ingreso al sistema se ve en la pestaña 'Actividad', próxima renovación en 'Resumen', e incidencias e historial de estados más abajo." />
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Historial de órdenes de servicio ({cliente.cantidadOs})</h2>
-            <SourceTag origen="apiworking" />
-          </SectionHeader>
-          <div className="ficha-field-list">
-            {cliente.osRefs.map((os) => (
-              <div key={os.idOrdenServicio} className="ficha-field-row">
-                <span className="ficha-field-label">
-                  {os.numeroOs} — {os.nombrePlan}
-                </span>
-                <span className="ficha-field-value">
-                  {os.fechaOs ? new Date(os.fechaOs).toLocaleDateString("es-PE") : "s/f"} ·{" "}
-                  {os.nEstadoApiWorking} · {formatCurrency(os.deuda)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Incidencias{incidenciasResp ? ` (${incidenciasResp.total})` : ""}</h2>
-            <SourceTag origen="apiworking" />
-          </SectionHeader>
-          <p className="muted">
-            Incidencias reportadas para este cliente en APIWorking, con su estado real de
-            resolución. No comparten lista con notas o tareas internas — esas viven en la
-            pestaña "Notas y tareas".
-          </p>
-          <div className="form-actions" style={{ justifyContent: "flex-start", gap: 8 }}>
-            {incidenciasResp === null && (
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleCargarIncidencias}
-                disabled={loadingIncidencias}
-              >
-                {loadingIncidencias ? "Cargando..." : "Ver incidencias"}
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled
-              title="Requiere el endpoint de creación en APIWorking, aún no conectado (ver IncidenciaManual)"
-            >
-              Crear incidencia
-            </button>
-            <Badge tone="future">Próximamente · Fase 2</Badge>
-          </div>
-          {errorIncidencias && <p className="error-text">{errorIncidencias}</p>}
-          {incidenciasResp !== null && incidenciasResp.total > 0 && (
-            <>
-              <p className="muted">
-                {incidenciasResp.abiertas} abierta(s) · {incidenciasResp.resueltas} resuelta(s)
-              </p>
-              <div className="modulo-clientes-periodo">
-                {(
-                  [
-                    { value: "todas", label: "Todas" },
-                    { value: "abiertas", label: "Abiertas" },
-                    { value: "resueltas", label: "Resueltas" },
-                  ] as const
-                ).map((f) => (
-                  <button
-                    key={f.value}
-                    type="button"
-                    className={filtroIncidencias === f.value ? "btn btn-primary" : "btn btn-secondary"}
-                    onClick={() => setFiltroIncidencias(f.value)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {incidenciasResp !== null && incidenciasResp.total === 0 && (
-            <EmptyState title="Sin incidencias registradas" />
-          )}
-          {incidenciasResp !== null && incidenciasResp.total > 0 && incidenciasFiltradas.length === 0 && (
-            <EmptyState title="Sin incidencias para este filtro" />
-          )}
-          {incidenciasFiltradas.length > 0 && (
-            <div className="ficha-field-list">
-              {incidenciasFiltradas.map((inc) => (
-                <div key={inc.idIncidencia} className="historial-seguimiento-item">
-                  <div className="historial-seguimiento-item-header">
-                    <IncidenciaEstadoBadge resuelta={inc.resuelta} />
-                    <Badge tone="neutral">{inc.tipo || "Sin tipo"}</Badge>
-                    <span className="historial-seguimiento-item-fecha">
-                      {inc.fecha ? new Date(inc.fecha).toLocaleString("es-PE") : "Sin fecha"}
-                    </span>
-                  </div>
-                  {inc.caso && <div className="historial-seguimiento-item-obs">{inc.caso}</div>}
-                  {inc.descripcion && inc.descripcion !== inc.caso && (
-                    <div className="historial-seguimiento-item-obs">{inc.descripcion}</div>
-                  )}
-                  <div className="historial-seguimiento-item-persona">
-                    Asignado a {inc.asignadoA || "—"}
-                    {inc.aCargo && inc.aCargo !== "SIN ASIGNAR" && ` · A cargo de ${inc.aCargo}`}
-                    {inc.reportadoPorCliente && " · Reportada por el cliente"}
-                  </div>
-                  {!inc.resuelta && (
-                    <div className="form-actions" style={{ justifyContent: "flex-start", marginTop: 4 }}>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        onClick={() => {
-                          setTareaInicial({
-                            titulo: `Seguimiento incidencia: ${inc.tipo || "Sin tipo"}`,
-                            descripcion: inc.caso || inc.descripcion || "",
-                            responsable: username ?? "",
-                          });
-                          setTareaDrawerOpen(true);
-                        }}
-                      >
-                        Crear tarea desde esta incidencia
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Capacitaciones{capacitaciones ? ` (${capacitaciones.length})` : ""}</h2>
-            <SourceTag origen="apiworking" />
-          </SectionHeader>
-          <p className="muted">
-            Capacitaciones y reforzamientos dictados a este cliente en APIWorking.
-          </p>
-          {loadingCapacitaciones && <Skeleton height={40} />}
-          {!loadingCapacitaciones && capacitaciones !== null && capacitaciones.length === 0 && (
-            <EmptyState title="Sin capacitaciones registradas" />
-          )}
-          {!loadingCapacitaciones && capacitaciones !== null && capacitaciones.length > 0 && (
-            <div className="ficha-field-list">
-              {capacitaciones.map((cap) => (
-                <div key={cap.idCapacitacion} className="historial-seguimiento-item">
-                  <div className="historial-seguimiento-item-header">
-                    <Badge
-                      tone={
-                        cap.estado === "CAPACITADO"
-                          ? "success"
-                          : cap.estado === "CANCELADA"
-                            ? "critical"
-                            : "warning"
-                      }
-                    >
-                      {cap.estado === "CAPACITADO"
-                        ? "Capacitado"
-                        : cap.estado === "CANCELADA"
-                          ? "Cancelada"
-                          : "Pendiente"}
-                    </Badge>
-                    {cap.tipo && <Badge tone="neutral">{cap.tipo}</Badge>}
-                    <span className="historial-seguimiento-item-fecha">
-                      {cap.fecha ? new Date(cap.fecha).toLocaleString("es-PE") : "Sin fecha"}
-                    </span>
-                  </div>
-                  <div className="historial-seguimiento-item-persona">
-                    {cap.capacitador && `Capacitador: ${cap.capacitador}`}
-                    {cap.modalidad && ` · Modalidad: ${cap.modalidad}`}
-                    {cap.agendador && ` · Agendador: ${cap.agendador}`}
-                    {cap.vendedor && ` · Vendedor: ${cap.vendedor}`}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Historial de seguimiento{historial ? ` (${historial.length})` : ""}</h2>
-            <SourceTag origen="apiworking" />
-          </SectionHeader>
-          <p className="muted">
-            Bitácora real de APIWorking para la OS vigente ({cliente.ordenVigente.numeroOs}) —
-            cambios de estado, llamadas al cliente e incidencias registradas por el equipo.
-          </p>
-          {historial === null && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleCargarHistorial}
-              disabled={loadingHistorial}
-            >
-              {loadingHistorial ? "Cargando..." : "Ver historial completo"}
-            </button>
-          )}
-          {errorHistorial && <p className="error-text">{errorHistorial}</p>}
-          {historial !== null && historial.length === 0 && (
-            <EmptyState title="Sin historial registrado" />
-          )}
-          {historial !== null && historial.length > 0 && (
-            <div className="ficha-field-list">
-              {historial.map((ev, i) => (
-                <div key={`${ev.fecha ?? "sf"}-${i}`} className="historial-seguimiento-item">
-                  <div className="historial-seguimiento-item-header">
-                    <HistorialEstadoBadge estado={ev.estado} />
-                    <span className="historial-seguimiento-item-fecha">
-                      {ev.fecha ? new Date(ev.fecha).toLocaleString("es-PE") : "Sin fecha"}
-                    </span>
-                  </div>
-                  {ev.observacion && (
-                    <div className="historial-seguimiento-item-obs">{ev.observacion}</div>
-                  )}
-                  <div className="historial-seguimiento-item-persona">{ev.persona || "—"}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-      )}
-
-      {tab === "resumen" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section ficha-full-width">
-          <h2>Alertas</h2>
-          {alertas.length === 0 ? (
-            <EmptyState title="Sin alertas activas" />
-          ) : (
-            alertas.map((a) => (
-              <div key={a.id} className="alerta-item">
-                <NivelAlertaPill nivel={a.nivel} /> <strong>{a.titulo}</strong> — {a.mensaje}
-              </div>
-            ))
-          )}
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <h2>Oportunidades</h2>
-          {oportunidades.length === 0 ? (
-            <EmptyState title="Sin oportunidades detectadas" />
-          ) : (
-            oportunidades.map((o) => (
-              <div key={o.id} className="oportunidad-item">
-                <strong>{o.titulo}</strong> — {o.mensaje} ({formatValorEstimado(o.valorEstimado)})
-              </div>
-            ))
-          )}
-        </section>
-      </div>
-      )}
-
-      {tab === "notas" && (
-      <div className="ficha-grid">
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Tareas ({tareas.length})</h2>
-            <SourceTag origen="local" />
-          </SectionHeader>
-          {tareas.length === 0 ? (
-            <EmptyState title="Sin tareas registradas" />
-          ) : (
-            <div className="seguimientos-list">
-              {tareas.map((t) => (
-                <TareaItem key={t.id} tarea={t} onChanged={refetch} />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="card ficha-section ficha-full-width">
-          <SectionHeader>
-            <h2>Notas ({notas.length})</h2>
-            <SourceTag origen="local" />
-          </SectionHeader>
-          {notas.length === 0 ? (
-            <EmptyState title="Sin notas registradas" />
-          ) : (
-            <div className="ficha-field-list">
-              {notas.map((n) => (
-                <div key={n.id} className="seguimiento-item">
-                  <div>{n.nota}</div>
-                  <div className="seguimiento-item-meta">
-                    {n.usuario} · {new Date(n.createdAt).toLocaleString("es-PE")}
-                  </div>
-                  <AdjuntosGaleria entidadTipo="NOTA" entidadId={n.id} />
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+        <HistorialTab
+          cliente={cliente}
+          numeroDocumentoCliente={cliente.numeroDocumentoCliente}
+          historial={historial}
+          loadingHistorial={loadingHistorial}
+          errorHistorial={errorHistorial}
+          onCargarHistorial={handleCargarHistorial}
+          capacitaciones={capacitaciones}
+          loadingCapacitaciones={loadingCapacitaciones}
+          seguimientoPostVenta={seguimientoPostVenta}
+          onOpenSeguimientoPvDrawer={() => setSeguimientoPvDrawerOpen(true)}
+        />
       )}
 
       <Drawer open={notaDrawerOpen} onClose={() => setNotaDrawerOpen(false)} title="Registrar nota">
-        <NotaForm
-          onSubmit={handleAddNota}
-          onCancel={() => setNotaDrawerOpen(false)}
-          submitting={savingNota}
-        />
+        <NotaForm onSubmit={handleAddNota} onCancel={() => setNotaDrawerOpen(false)} submitting={savingNota} />
       </Drawer>
 
-      <Drawer open={tareaDrawerOpen} onClose={() => setTareaDrawerOpen(false)} title="Crear tarea">
+      <Drawer
+        open={tareaDrawerOpen}
+        onClose={() => {
+          setTareaDrawerOpen(false);
+          setTareaDesdeIncidencia(null);
+        }}
+        title={tareaDesdeIncidencia ? `Tarea — incidencia #${tareaDesdeIncidencia.idIncidencia}` : "Crear tarea"}
+      >
         <TareaForm
           key={tareaDrawerOpen ? JSON.stringify(tareaInicial) : "closed"}
           initial={tareaInicial}
           onSubmit={handleAddTarea}
-          onCancel={() => setTareaDrawerOpen(false)}
+          onCancel={() => {
+            setTareaDrawerOpen(false);
+            setTareaDesdeIncidencia(null);
+          }}
           submitting={savingTarea}
         />
       </Drawer>

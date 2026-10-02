@@ -9,10 +9,13 @@ import {
   checkSession,
   login as loginRequest,
   logout as logoutRequest,
+  type RolUsuario,
 } from "../services/auth";
+import { resetPopupsBolsa } from "../utils/bolsaPopupStorage";
 
 interface AuthContextValue {
   username: string | null;
+  rol: RolUsuario | null;
   isAuthenticated: boolean;
   loading: boolean;
   login: (usuario: string, password: string) => Promise<void>;
@@ -24,14 +27,16 @@ const STORAGE_KEY = "pv_username";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
+  const [rol, setRol] = useState<RolUsuario | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       const storedUsername = localStorage.getItem(STORAGE_KEY);
-      const isValid = await checkSession();
-      if (isValid && storedUsername) {
+      const session = await checkSession();
+      if (session.authenticated && storedUsername) {
         setUsername(storedUsername);
+        setRol(session.rol ?? null);
       } else {
         localStorage.removeItem(STORAGE_KEY);
       }
@@ -47,17 +52,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       usuario;
     localStorage.setItem(STORAGE_KEY, resolvedUsername);
     setUsername(resolvedUsername);
+    setRol(result.rol);
   }
 
   async function logout() {
     await logoutRequest();
     localStorage.removeItem(STORAGE_KEY);
     setUsername(null);
+    setRol(null);
+    // Para que un login posterior en la misma pestaña vuelva a mostrar el
+    // popup de estado de la bolsa con el estado actualizado, en vez de
+    // quedar "ya visto" para siempre en esta sesion de navegador.
+    resetPopupsBolsa();
   }
 
   return (
     <AuthContext.Provider
-      value={{ username, isAuthenticated: !!username, loading, login, logout }}
+      value={{ username, rol, isAuthenticated: !!username, loading, login, logout }}
     >
       {children}
     </AuthContext.Provider>

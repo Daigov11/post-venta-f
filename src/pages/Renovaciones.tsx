@@ -1,853 +1,489 @@
-import { useMemo, useState } from "react";
-import { AccionesClienteDrawer, columnaAccionesCliente } from "../components/panels/AccionesClienteDrawer";
-import { Badge, type BadgeTone } from "../components/ui/Badge";
+import { useEffect, useMemo, useState } from "react";
+import { AccionesClienteDrawer } from "../components/panels/AccionesClienteDrawer";
+import { ActionMenu, type ActionMenuItem } from "../components/ui/ActionMenu";
+import { Badge } from "../components/ui/Badge";
 import { ClienteCell } from "../components/ui/ClienteCell";
 import { CollapsibleCard } from "../components/ui/CollapsibleCard";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
+import { Drawer } from "../components/ui/Drawer";
+import { EmptyState } from "../components/ui/EmptyState";
+import { ExportButtons } from "../components/ui/ExportButtons";
 import { FilterBar } from "../components/ui/FilterBar";
 import { KpiCard } from "../components/ui/KpiCard";
-import { SegmentoPill } from "../components/ui/StatusPill";
-import { ExportButtons } from "../components/ui/ExportButtons";
+import { Pagination } from "../components/ui/Pagination";
+import { SearchInput } from "../components/ui/SearchInput";
+import { TareaForm, type TareaFormValues } from "../components/forms/TareaForm";
+import { useAuth } from "../context/AuthContext";
 import { useClientes } from "../hooks/useClientes";
-import type { PagoNormalizado, Periodicidad, PostVentaCliente } from "../types/postventaCliente";
+import { useResumenBajas } from "../hooks/useResumenBajas";
+import { createTarea } from "../services/tareas";
+import type { Periodicidad, PostVentaCliente } from "../types/postventaCliente";
+import { buildContactoMenuItems } from "../utils/contactoMenuItems";
 import { exportarExcel, exportarPdf, type ExportColumn } from "../utils/exportTable";
 import { formatCurrency, formatNumber } from "../utils/format";
+import { CrearSeguimientoDialog } from "./clienteFicha/CrearSeguimientoDialog";
+import { ClaseCobranzaBadge } from "./renovaciones/badges";
+import {
+  claseCobranzaMes,
+  calcularResumenMensual,
+  esProblema,
+  fechaRelevante,
+  mesRelativo,
+  montoRealCiclo,
+  PERIODICIDAD_LABEL,
+  primerDiaMes,
+  resumenAnclaPendiente,
+  resumenDeudaArrastrada,
+  resumenSinIngresos,
+  segmentoListaCobranza,
+  contarSinDato,
+  textoDiasParaClase,
+  ultimoDiaMes,
+  type ClaseCobranzaMes,
+  type MesInfo,
+  type SegmentoListaCobranza,
+} from "./renovaciones/proyeccion";
+import "./Renovaciones.css";
 
-// Se trae todo de una — no es paginado como Clientes, el objetivo es
-// dimensionar el riesgo/oportunidad de un vistazo. Alcanza para cualquier
-// tamaño realista de cartera.
-const PAGE_SIZE = 1000;
-
-// Ciclos de facturacion conocidos — confirmado con negocio (Fase 2) que solo
-// aplican a clientes Mensual (diaCicloMensual). Cualquier otro dia real cae
-// en "otros", nunca se descarta el cliente.
+const PAGE_SIZE = 5000;
+const TABLA_PAGE_SIZE = 10;
 const CICLOS_CONOCIDOS = [1, 12, 22];
+type PeriodicidadFiltro = "" | Exclude<Periodicidad, "DESCONOCIDO">;
+type Tab = "no_pagaron" | "ya_pagaron";
 
-type Alcance = "ventana" | "esteMes" | "mesEspecifico" | "todos";
-type Vista = "proximas" | "vencidas" | "cobranzaMensual";
-type PeriodicidadFiltro = "" | "MENSUAL" | "TRIMESTRAL" | "SEMESTRAL" | "ANUAL";
-
-// "En problema" = ya viene golpeado, no es una renovacion que simplemente se
-// acerca: segmento Critico (atraso de pago calculado) o ya SUSPENDIDO POR
-// PAGO en APIWorking. Deliberadamente NO incluye "INICIAR COBRANZA" — es el
-// estado de ~80% de toda la cartera (parece el estado operativo normal de un
-// cliente activo en APIWorking, no una alarma).
-//
-// Para estos clientes, "proximaRenovacion" es enganoso: al estar calculada
-// siempre hacia adelante (ver calcularProximoVencimiento en el backend),
-// muestra el proximo ciclo teorico como si fuera un vencimiento normal,
-// aunque el cliente lleve meses sin pagar el ciclo anterior. La pestana "Ya
-// vencidas" usa diasVencido/vencidoDesde (calculado en el backend a partir
-// del ultimo comprobante real impago, no del calendario que sigue avanzando
-// solo tras una suspension) en vez de proximaRenovacion, para no confundir
-// "esta por vencer" con "ya vencio y sigue sin pagar".
-function esProblema(cliente: PostVentaCliente): boolean {
-  return (
-    cliente.segmentoEfectivo === "CRITICO" ||
-    cliente.ordenVigente.nEstadoApiWorking.trim().toUpperCase() === "SUSPENDIDO POR PAGO"
-  );
-}
-
-// "Ya pago el ciclo que viene" = su comprobante mas reciente en pagos[] fue
-// emitido despues de ultimoVencimientoPago — es decir, ya existe una factura
-// (y esta pagada, porque si no seria Critico y no estaria en "sanas") que
-// cubre el ciclo actual/que esta por vencer, no solo el anterior. Distingue
-// "ya esta resuelto, no hace falta contactarlo" de "todavia no le llega la
-// factura de este ciclo, hay que estar atento".
-function yaPagoProximoCiclo(cliente: PostVentaCliente): boolean {
-  const pagos = cliente.ordenVigente.pagos.filter(
-    (p): p is typeof p & { fechaEmitido: string } => p.fechaEmitido !== null
-  );
-  if (pagos.length === 0 || !cliente.ultimoVencimientoPago) return false;
-  const masReciente = pagos.reduce((a, b) => (a.fechaEmitido > b.fechaEmitido ? a : b));
-  return masReciente.fechaEmitido >= cliente.ultimoVencimientoPago;
-}
-
-function esDeEsteMes(proximaRenovacionIso: string | null, ahora: Date): boolean {
-  if (!proximaRenovacionIso) return false;
-  const fecha = new Date(proximaRenovacionIso);
-  return fecha.getFullYear() === ahora.getFullYear() && fecha.getMonth() === ahora.getMonth();
-}
-
-function esDelMes(iso: string | null, mesInfo: MesInfo): boolean {
-  if (!iso) return false;
-  const fecha = new Date(iso);
-  return fecha.getFullYear() === mesInfo.anio && fecha.getMonth() === mesInfo.mes;
-}
-
-// ---------------------------------------------------------------------------
-// Cobranza Mensual — solo para clientes MENSUAL: al facturarse todos los
-// meses, Junio/Julio/Agosto son directamente comparables mes a mes (a
-// diferencia de Trimestral/Semestral/Anual, donde "el mes pasado" no dice
-// nada del ciclo de facturacion). Se compara contra data real (comprobantes
-// ya emitidos), nunca se proyecta un monto que no salga de un comprobante.
-// ---------------------------------------------------------------------------
-
-interface MesInfo {
-  anio: number;
-  mes: number; // 0-indexado, como Date.getMonth()
-  label: string;
-}
-
-function mesRelativo(ahora: Date, offsetMeses: number): MesInfo {
-  const d = new Date(ahora.getFullYear(), ahora.getMonth() + offsetMeses, 1);
-  return {
-    anio: d.getFullYear(),
-    mes: d.getMonth(),
-    label: d.toLocaleDateString("es-PE", { month: "long", year: "numeric" }),
-  };
-}
-
-interface ResumenMesCliente {
-  facturado: number;
-  deuda: number;
-  tieneComprobante: boolean;
-}
-
-function resumenMesCliente(cliente: PostVentaCliente, anio: number, mes: number): ResumenMesCliente {
-  const delMes = cliente.ordenVigente.pagos.filter((p): p is PagoNormalizado & { fechaEmitido: string } => {
-    if (!p.fechaEmitido) return false;
-    const f = new Date(p.fechaEmitido);
-    return f.getFullYear() === anio && f.getMonth() === mes;
-  });
-  return {
-    facturado: delMes.reduce((s, p) => s + p.total, 0),
-    deuda: delMes.reduce((s, p) => s + p.deuda, 0),
-    tieneComprobante: delMes.length > 0,
-  };
-}
-
-type EstadoMes = "PAGADO" | "DEBE" | "PENDIENTE" | "VENCIDO_SIN_FACTURAR" | "SIN_COMPROBANTE";
-
-const ESTADO_MES_BADGE: Record<EstadoMes, { label: string; tone: BadgeTone }> = {
-  PAGADO: { label: "Pagado", tone: "success" },
-  DEBE: { label: "Debe", tone: "critical" },
-  PENDIENTE: { label: "Pendiente de facturar", tone: "neutral" },
-  VENCIDO_SIN_FACTURAR: { label: "Vencido sin facturar", tone: "critical" },
-  SIN_COMPROBANTE: { label: "Sin comprobante", tone: "neutral" },
+const ORDEN_CLASE: Record<ClaseCobranzaMes, number> = {
+  vencido_este_mes: 0,
+  vence_hoy: 1,
+  proximo: 2,
+  pagado: 3,
 };
 
-// Clasifica un mes puntual para un cliente mensual. "Pendiente de facturar"
-// y "Vencido sin facturar" solo tienen sentido para el mes EN CURSO (se
-// comparan contra "hoy") — para un mes ya cerrado, sin comprobante es
-// simplemente "Sin comprobante", no hay nada que esperar.
-function estadoDelMes(
-  cliente: PostVentaCliente,
-  mesInfo: MesInfo,
-  ahora: Date,
-  esMesActual: boolean
-): EstadoMes {
-  const resumen = resumenMesCliente(cliente, mesInfo.anio, mesInfo.mes);
-  if (resumen.tieneComprobante) {
-    return resumen.deuda > 0 ? "DEBE" : "PAGADO";
-  }
-  if (!esMesActual) return "SIN_COMPROBANTE";
-  if (esDeEsteMes(cliente.ultimoVencimientoPago, ahora)) {
-    return "VENCIDO_SIN_FACTURAR";
-  }
-  return "PENDIENTE";
+interface Fila {
+  cliente: PostVentaCliente;
+  clase: ClaseCobranzaMes;
 }
 
-function renderResumenMes(r: ResumenMesCliente) {
-  if (!r.tieneComprobante) return <span className="muted">—</span>;
-  return (
-    <span style={r.deuda > 0 ? { color: "var(--color-critical)", fontWeight: 600 } : undefined}>
-      {formatCurrency(r.facturado)}
-    </span>
-  );
+interface FacetStats {
+  count: number;
+  monto: number;
 }
 
-function columnasCobranzaMensual(
-  mesSeleccionado: MesInfo,
-  ahora: Date,
-  esMesActual: boolean,
-  onAbrirAcciones: (numeroDocumentoCliente: string) => void
-): DataTableColumn<PostVentaCliente>[] {
+function fmtFecha(d: Date): string {
+  return d.toLocaleDateString("es-PE");
+}
+
+function compararFilas(a: Fila, b: Fila): number {
+  if (a.clase !== b.clase) return ORDEN_CLASE[a.clase] - ORDEN_CLASE[b.clase];
+  const fa = fechaRelevante(a.cliente);
+  const fb = fechaRelevante(b.cliente);
+  if (!fa && !fb) return 0;
+  if (!fa) return 1;
+  if (!fb) return -1;
+  return fa.localeCompare(fb);
+}
+
+function fechaEsperadaTexto(cliente: PostVentaCliente): string {
+  if (esProblema(cliente)) {
+    return cliente.vencidoDesde ? `Vencido desde ${new Date(cliente.vencidoDesde).toLocaleDateString("es-PE")}` : "No determinado";
+  }
+  return cliente.proximaRenovacion ? new Date(cliente.proximaRenovacion).toLocaleDateString("es-PE") : "—";
+}
+
+function columnasCobranza(
+  fechaCorte: Date,
+  onAbrirAcciones: (numeroDocumentoCliente: string) => void,
+  onCrearTarea: (fila: Fila) => void,
+  onRegistrarSeguimiento: (fila: Fila) => void
+): DataTableColumn<Fila>[] {
   return [
-    columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
+    {
+      key: "acciones",
+      label: "",
+      align: "center",
+      render: (f) => {
+        const items: ActionMenuItem[] = [
+          { key: "agendar", label: "Agendar / Interés", onSelect: () => onAbrirAcciones(f.cliente.numeroDocumentoCliente) },
+          { key: "ficha", label: "Abrir ficha", to: `/clientes/${f.cliente.numeroDocumentoCliente}` },
+          { key: "crear-tarea", label: "Crear tarea de renovación", onSelect: () => onCrearTarea(f) },
+          ...buildContactoMenuItems({
+            numeroDocumentoCliente: f.cliente.numeroDocumentoCliente,
+            idOrdenServicio: f.cliente.ordenVigente.idOrdenServicio,
+            telefonoLimpio: f.cliente.telefonoEfectivo,
+          }),
+          { key: "seguimiento", label: "Registrar seguimiento", onSelect: () => onRegistrarSeguimiento(f) },
+          {
+            key: "estado-renovacion",
+            label: "Ver estado de renovación",
+            to: `/clientes/${f.cliente.numeroDocumentoCliente}?tab=renovacion`,
+          },
+        ];
+        return <ActionMenu label={`Acciones para ${f.cliente.nombreCliente}`} items={items} />;
+      },
+    },
+    {
+      key: "sistema",
+      label: "Sistema / Orden",
+      render: (f) => <span className="muted">{f.cliente.ordenVigente.numeroOs || "—"}</span>,
+    },
     {
       key: "cliente",
-      label: "Cliente",
-      render: (c) => (
-        <ClienteCell
-          numeroDocumentoCliente={c.numeroDocumentoCliente}
-          nombreCliente={c.nombreCliente}
-          sistemas={c.sistemas}
-        />
+      label: "Cliente / RUC",
+      render: (f) => (
+        <ClienteCell numeroDocumentoCliente={f.cliente.numeroDocumentoCliente} nombreCliente={f.cliente.nombreCliente} sistemas={f.cliente.sistemas} />
       ),
+    },
+    { key: "plan", label: "Plan", render: (f) => f.cliente.planActual.nombre || "—" },
+    {
+      key: "periodicidad",
+      label: "Periodicidad",
+      render: (f) =>
+        f.cliente.planActual.periodicidad === "DESCONOCIDO" ? "—" : PERIODICIDAD_LABEL[f.cliente.planActual.periodicidad],
     },
     {
       key: "ciclo",
       label: "Ciclo",
       align: "center",
-      render: (c) =>
-        c.diaCicloMensual === null ? (
-          <span className="muted">—</span>
-        ) : (
-          String(c.diaCicloMensual).padStart(2, "0")
-        ),
+      render: (f) => (f.cliente.diaCicloMensual === null ? <span className="muted">—</span> : String(f.cliente.diaCicloMensual).padStart(2, "0")),
     },
     {
       key: "monto",
-      label: mesSeleccionado.label,
+      label: "Monto",
       align: "right",
-      render: (c) => renderResumenMes(resumenMesCliente(c, mesSeleccionado.anio, mesSeleccionado.mes)),
+      render: (f) => formatCurrency(montoRealCiclo(f.cliente) ?? 0),
+    },
+    {
+      key: "fecha",
+      label: "Fecha esperada",
+      render: (f) => fechaEsperadaTexto(f.cliente),
     },
     {
       key: "estado",
       label: "Estado",
-      align: "center",
-      render: (c) => {
-        const cfg = ESTADO_MES_BADGE[estadoDelMes(c, mesSeleccionado, ahora, esMesActual)];
-        return <Badge tone={cfg.tone}>{cfg.label}</Badge>;
-      },
+      render: (f) => <ClaseCobranzaBadge clase={f.clase} />,
     },
-    { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
+    {
+      key: "dias",
+      label: "Días vencidos / restantes",
+      render: (f) => textoDiasParaClase(f.cliente, f.clase, fechaCorte),
+    },
   ];
 }
 
-// ---------------------------------------------------------------------------
-// Resumen de renovaciones por periodicidad — a diferencia de Cobranza
-// Mensual (solo Mensual, compara meses cerrados), esto cubre las 4
-// periodicidades y solo mira hacia adelante (mes actual + futuros), para
-// responder "cuantos ya renovaron este mes y cuantos faltan, por tipo de
-// plan, y cuanto se obtendria/se va obteniendo".
-// ---------------------------------------------------------------------------
-
-const PERIODICIDADES: Exclude<Periodicidad, "DESCONOCIDO">[] = [
-  "MENSUAL",
-  "TRIMESTRAL",
-  "SEMESTRAL",
-  "ANUAL",
+const columnasExport: ExportColumn<Fila>[] = [
+  { header: "Sistema/Orden", value: (f) => f.cliente.ordenVigente.numeroOs },
+  { header: "Cliente", value: (f) => f.cliente.nombreCliente },
+  { header: "RUC/DNI", value: (f) => f.cliente.numeroDocumentoCliente },
+  { header: "Plan", value: (f) => f.cliente.planActual.nombre },
+  {
+    header: "Periodicidad",
+    value: (f) => (f.cliente.planActual.periodicidad === "DESCONOCIDO" ? "" : PERIODICIDAD_LABEL[f.cliente.planActual.periodicidad]),
+  },
+  { header: "Ciclo", value: (f) => f.cliente.diaCicloMensual ?? "" },
+  { header: "Monto", value: (f) => montoRealCiclo(f.cliente) ?? "" },
+  { header: "Fecha esperada", value: (f) => fechaEsperadaTexto(f.cliente) },
+  { header: "Estado", value: (f) => f.clase },
+  { header: "Ejecutivo", value: (f) => f.cliente.ordenVigente.ejecutivo ?? "" },
 ];
 
-const PERIODICIDAD_LABEL: Record<Exclude<Periodicidad, "DESCONOCIDO">, string> = {
-  MENSUAL: "Mensual",
-  TRIMESTRAL: "Trimestral",
-  SEMESTRAL: "Semestral",
-  ANUAL: "Anual",
+function fechaInputValue(fecha: Date): string {
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, "0")}-${String(fecha.getDate()).padStart(2, "0")}`;
+}
+
+// Botonera con cifras — reemplaza los <select> de Periodicidad y Ciclo:
+// cada boton muestra su propia cantidad + subtotal monetario (calculados
+// sobre TODOS los demas filtros activos, menos este mismo — asi el numero
+// que se ve es "cuantos tendria si elijo esta opcion"), y el estado activo
+// con contraste real (no solo color).
+function FacetButtons<T extends string>({
+  ariaLabel,
+  opciones,
+  activo,
+  onChange,
+  facets,
+}: {
+  ariaLabel: string;
+  opciones: { value: T; label: string }[];
+  activo: T;
+  onChange: (value: T) => void;
+  facets: Map<T, FacetStats>;
+}) {
+  return (
+    <div className="renovaciones-facet-grid" role="group" aria-label={ariaLabel}>
+      {opciones.map((op) => {
+        const stats = facets.get(op.value) ?? { count: 0, monto: 0 };
+        return (
+          <button
+            key={op.value}
+            type="button"
+            className={activo === op.value ? "renovaciones-facet-boton activo" : "renovaciones-facet-boton"}
+            aria-pressed={activo === op.value}
+            onClick={() => onChange(op.value)}
+          >
+            <span className="renovaciones-facet-label">{op.label}</span>
+            <span className="renovaciones-facet-count">{formatNumber(stats.count)}</span>
+            <span className="renovaciones-facet-monto">{formatCurrency(stats.monto)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Mini-tabla reutilizada por los 3 avisos secundarios "de cliente completo"
+// (ancla pendiente, sin ingresos, deuda arrastrada) — misma forma que la de
+// bajas, solo cambia que columna de "motivo" mostrar.
+function MiniListaClientes({
+  clientes,
+  motivo,
+  monto,
+}: {
+  clientes: PostVentaCliente[];
+  motivo: (c: PostVentaCliente) => string;
+  monto: (c: PostVentaCliente) => number;
+}) {
+  return (
+    <DataTable
+      columns={[
+        {
+          key: "cliente",
+          label: "Cliente / RUC",
+          render: (c: PostVentaCliente) => (
+            <ClienteCell numeroDocumentoCliente={c.numeroDocumentoCliente} nombreCliente={c.nombreCliente} sistemas={c.sistemas} />
+          ),
+        },
+        { key: "plan", label: "Plan", render: (c) => c.planActual.nombre || "—" },
+        { key: "monto", label: "Monto", align: "right", render: (c) => formatCurrency(monto(c)) },
+        { key: "motivo", label: "Motivo", render: (c) => <span className="muted">{motivo(c)}</span> },
+        { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
+      ]}
+      rows={clientes}
+      rowKey={(c) => c.numeroDocumentoCliente}
+      emptyMessage="Sin clientes en esta condición."
+    />
+  );
+}
+
+const SEGMENTO_LABEL: Record<SegmentoListaCobranza, string> = {
+  vencido_este_mes: "Vencidos este mes",
+  vence_hoy: "Vence hoy",
+  proximos_7_dias: "Próximos a vencer",
+  resto_mes: "Resto del mes",
 };
 
-// Mismo criterio de origen que usa el backend para anclar la renovacion de
-// Semestral/Anual (ver calcularProximaRenovacionDesdeComprobante en
-// facturacion.ts) — un cargo suelto ("Directo", "Administrativo Equipo") no
-// cuenta como renovacion real para esos casos. Mensual/Trimestral no
-// necesitan este filtro: casi todo lo que factura esa OS es el ciclo mismo.
-const ORIGENES_RENOVACION_REAL = new Set(["Administrativo Anualidad", "Administrativo Plan"]);
-
-function comprobantesRenovacionDelMes(
-  cliente: PostVentaCliente,
-  mesInfo: MesInfo
-): (PagoNormalizado & { fechaEmitido: string })[] {
-  const delMes = cliente.ordenVigente.pagos.filter(
-    (p): p is PagoNormalizado & { fechaEmitido: string } => {
-      if (!p.fechaEmitido) return false;
-      const f = new Date(p.fechaEmitido);
-      return f.getFullYear() === mesInfo.anio && f.getMonth() === mesInfo.mes;
-    }
-  );
-  const periodicidad = cliente.planActual.periodicidad;
-  if (periodicidad !== "SEMESTRAL" && periodicidad !== "ANUAL") return delMes;
-  const relevantes = delMes.filter((p) => ORIGENES_RENOVACION_REAL.has(p.origen));
-  return relevantes.length > 0 ? relevantes : delMes;
-}
-
-interface ClienteRenovacionMes {
-  cliente: PostVentaCliente;
-  periodicidad: Exclude<Periodicidad, "DESCONOCIDO">;
-  monto: number;
-  fecha: string | null;
-}
-
-interface PeriodicidadResumenMes {
-  periodicidad: Exclude<Periodicidad, "DESCONOCIDO">;
-  yaRenovaronCount: number;
-  yaRenovaronMonto: number;
-  yaRenovaronClientes: ClienteRenovacionMes[];
-  faltanRenovarCount: number;
-  faltanRenovarMonto: number;
-  faltanRenovarClientes: ClienteRenovacionMes[];
-  totalEsperadoMonto: number;
-}
-
-function calcularResumenPorPeriodicidad(
-  todos: PostVentaCliente[],
-  mesInfo: MesInfo
-): PeriodicidadResumenMes[] {
-  return PERIODICIDADES.map((periodicidad) => {
-    const deEstaPeriodicidad = todos.filter((c) => c.planActual.periodicidad === periodicidad);
-
-    // "Ya renovaron" = tienen un comprobante de renovacion real emitido en
-    // este mes calendario — no importa si venian sanos o en problema antes.
-    let yaRenovaronMonto = 0;
-    const yaRenovaronClientes: ClienteRenovacionMes[] = [];
-    for (const c of deEstaPeriodicidad) {
-      const comprobantes = comprobantesRenovacionDelMes(c, mesInfo);
-      if (comprobantes.length === 0) continue;
-      const facturado = comprobantes.reduce((s, p) => s + p.total, 0);
-      const deuda = comprobantes.reduce((s, p) => s + p.deuda, 0);
-      const monto = facturado - deuda; // solo lo efectivamente cobrado
-      yaRenovaronMonto += monto;
-      const fecha = comprobantes.reduce((a, b) => (a.fechaEmitido > b.fechaEmitido ? a : b)).fechaEmitido;
-      yaRenovaronClientes.push({ cliente: c, periodicidad, monto, fecha });
-    }
-
-    // "Faltan renovar" = su proximo ciclo cae en este mes y todavia no lo
-    // pagaron (sanas) + los que ya se vencieron exactamente este mes sin
-    // pagar (problema). No se cuentan vencidos de meses anteriores aca —
-    // esos son el historico de "Ya vencidas", no "de este mes".
-    const sanasDelMes = deEstaPeriodicidad.filter(
-      (c) => !esProblema(c) && esDelMes(c.proximaRenovacion, mesInfo)
-    );
-    const vencidasDelMes = deEstaPeriodicidad.filter(
-      (c) => esProblema(c) && esDelMes(c.vencidoDesde, mesInfo)
-    );
-    const faltanRenovarClientes: ClienteRenovacionMes[] = [
-      ...sanasDelMes.map((c) => ({
-        cliente: c,
-        periodicidad,
-        monto: c.ingresoMensualReal ?? 0,
-        fecha: c.proximaRenovacion,
-      })),
-      ...vencidasDelMes.map((c) => ({
-        cliente: c,
-        periodicidad,
-        monto: c.ingresoMensualReal ?? 0,
-        fecha: c.vencidoDesde,
-      })),
-    ];
-    const faltanRenovarMonto = faltanRenovarClientes.reduce((s, r) => s + r.monto, 0);
-
-    return {
-      periodicidad,
-      yaRenovaronCount: yaRenovaronClientes.length,
-      yaRenovaronMonto,
-      yaRenovaronClientes,
-      faltanRenovarCount: faltanRenovarClientes.length,
-      faltanRenovarMonto,
-      faltanRenovarClientes,
-      totalEsperadoMonto: yaRenovaronMonto + faltanRenovarMonto,
-    };
-  });
-}
-
-// Exporta la lista de clientes actualmente visible en el panel de
-// renovaciones por periodicidad (respeta el filtro de periodicidad y el mes
-// elegido) — todo del lado del cliente, no hay endpoint nuevo: el dataset ya
-// esta cargado en memoria.
-function exportarClientesCsv(
-  filas: ClienteRenovacionMes[],
-  tipo: "yaRenovaron" | "faltanRenovar",
-  mesLabel: string
-) {
-  const headers = [
-    "Cliente",
-    "RUC/DNI",
-    "Periodicidad",
-    "Plan",
-    tipo === "yaRenovaron" ? "Fecha de pago" : "Vence / vencido desde",
-    "Monto",
-    "Estado",
-    "Ejecutivo",
-  ];
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
-  const filasCsv = filas.map((r) => [
-    r.cliente.nombreCliente,
-    r.cliente.numeroDocumentoCliente,
-    PERIODICIDAD_LABEL[r.periodicidad],
-    r.cliente.planActual.nombre,
-    r.fecha ? new Date(r.fecha).toLocaleDateString("es-PE") : "",
-    r.monto.toFixed(2),
-    tipo === "yaRenovaron" ? "Ya renovó" : esProblema(r.cliente) ? "Vencido" : "Pendiente",
-    r.cliente.ordenVigente.ejecutivo ?? "",
-  ]);
-  const csv = [headers, ...filasCsv].map((fila) => fila.map(escape).join(",")).join("\r\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `renovaciones_${tipo === "yaRenovaron" ? "ya_renovaron" : "faltan_renovar"}_${mesLabel.replace(/\s+/g, "_")}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function columnasExportResumenMes(
-  tipo: "yaRenovaron" | "faltanRenovar"
-): ExportColumn<ClienteRenovacionMes>[] {
-  return [
-    { header: "Cliente", value: (r) => r.cliente.nombreCliente },
-    { header: "RUC/DNI", value: (r) => r.cliente.numeroDocumentoCliente },
-    { header: "Periodicidad", value: (r) => PERIODICIDAD_LABEL[r.periodicidad] },
-    { header: "Plan", value: (r) => r.cliente.planActual.nombre },
-    {
-      header: tipo === "yaRenovaron" ? "Fecha de pago" : "Vence / vencido desde",
-      value: (r) => (r.fecha ? new Date(r.fecha).toLocaleDateString("es-PE") : ""),
-    },
-    { header: "Monto", value: (r) => r.monto },
-    {
-      header: "Estado",
-      value: (r) => (tipo === "yaRenovaron" ? "Ya renovó" : esProblema(r.cliente) ? "Vencido" : "Pendiente"),
-    },
-    { header: "Ejecutivo", value: (r) => r.cliente.ordenVigente.ejecutivo ?? "" },
-  ];
-}
-
-function columnasClientesResumenMes(
-  tipo: "yaRenovaron" | "faltanRenovar",
-  onAbrirAcciones: (numeroDocumentoCliente: string) => void
-): DataTableColumn<ClienteRenovacionMes>[] {
-  return [
-    columnaAccionesCliente<ClienteRenovacionMes>(
-      (r) => r.cliente.numeroDocumentoCliente,
-      onAbrirAcciones
-    ),
-    {
-      key: "cliente",
-      label: "Cliente",
-      render: (r) => (
-        <ClienteCell
-          numeroDocumentoCliente={r.cliente.numeroDocumentoCliente}
-          nombreCliente={r.cliente.nombreCliente}
-          sistemas={r.cliente.sistemas}
-        />
-      ),
-    },
-    {
-      key: "periodicidad",
-      label: "Periodicidad",
-      render: (r) => PERIODICIDAD_LABEL[r.periodicidad],
-    },
-    { key: "plan", label: "Plan", render: (r) => r.cliente.planActual.nombre },
-    {
-      key: "fecha",
-      label: tipo === "yaRenovaron" ? "Fecha de pago" : "Vence / vencido desde",
-      render: (r) => (r.fecha ? new Date(r.fecha).toLocaleDateString("es-PE") : "—"),
-    },
-    {
-      key: "monto",
-      label: tipo === "yaRenovaron" ? "Monto cobrado" : "Monto estimado",
-      align: "right",
-      render: (r) => formatCurrency(r.monto),
-    },
-    { key: "estado", label: "Estado", align: "center", render: (r) => (
-      tipo === "yaRenovaron" ? (
-        <Badge tone="success">Ya renovó</Badge>
-      ) : esProblema(r.cliente) ? (
-        <Badge tone="critical">Vencido</Badge>
-      ) : (
-        <Badge tone="warning">Pendiente</Badge>
-      )
-    ) },
-    { key: "ejecutivo", label: "Ejecutivo", render: (r) => r.cliente.ordenVigente.ejecutivo ?? "—" },
-  ];
-}
-
-const columnasResumenPeriodicidad: DataTableColumn<PeriodicidadResumenMes>[] = [
-  { key: "periodicidad", label: "Periodicidad", render: (r) => PERIODICIDAD_LABEL[r.periodicidad] },
-  {
-    key: "yaRenovaron",
-    label: "Ya renovaron",
-    align: "right",
-    render: (r) => formatNumber(r.yaRenovaronCount),
-  },
-  {
-    key: "montoRenovado",
-    label: "Monto cobrado",
-    align: "right",
-    render: (r) => formatCurrency(r.yaRenovaronMonto),
-  },
-  {
-    key: "faltan",
-    label: "Faltan renovar",
-    align: "right",
-    render: (r) =>
-      r.faltanRenovarCount > 0 ? (
-        <Badge tone="warning">{formatNumber(r.faltanRenovarCount)}</Badge>
-      ) : (
-        formatNumber(0)
-      ),
-  },
-  {
-    key: "montoPendiente",
-    label: "Monto pendiente",
-    align: "right",
-    render: (r) => formatCurrency(r.faltanRenovarMonto),
-  },
-  {
-    key: "totalEsperado",
-    label: "Total esperado del mes",
-    align: "right",
-    render: (r) => <strong>{formatCurrency(r.totalEsperadoMonto)}</strong>,
-  },
-];
-
-function proximaBadge(dias: number | null) {
-  if (dias === null) return <span className="muted">—</span>;
-  if (dias <= 7) return <Badge tone="critical">{dias} día(s)</Badge>;
-  if (dias <= 15) return <Badge tone="warning">{dias} día(s)</Badge>;
-  return <Badge tone="neutral">{dias} día(s)</Badge>;
-}
-
-// "desc" (default, igual que antes) = antiguos primero (mas dias vencido
-// arriba). "asc" = recientes primero. Sin dato (diasVencido null) siempre al
-// final, en cualquiera de los dos sentidos — no tiene sentido intercalarlo
-// entre fechas reales.
-function compararVencidos(a: PostVentaCliente, b: PostVentaCliente, dir: "asc" | "desc"): number {
-  if (a.diasVencido === null && b.diasVencido === null) return 0;
-  if (a.diasVencido === null) return 1;
-  if (b.diasVencido === null) return -1;
-  return dir === "desc" ? b.diasVencido - a.diasVencido : a.diasVencido - b.diasVencido;
-}
-
-function vencidaBadge(dias: number | null) {
-  if (dias === null) return <span className="muted">No determinado</span>;
-  return <Badge tone="critical">{dias} día(s)</Badge>;
-}
-
-function columnasProximas(
-  onAbrirAcciones: (numeroDocumentoCliente: string) => void
-): DataTableColumn<PostVentaCliente>[] {
-  return [
-  columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
-  { key: "renovacion", label: "Vence en", render: (c) => proximaBadge(c.diasParaRenovacion) },
-  {
-    key: "cliente",
-    label: "Cliente",
-    render: (c) => (
-      <ClienteCell
-        numeroDocumentoCliente={c.numeroDocumentoCliente}
-        nombreCliente={c.nombreCliente}
-        sistemas={c.sistemas}
-      />
-    ),
-  },
-  {
-    key: "plan",
-    label: "Plan",
-    render: (c) => `${c.planActual.nombre} (${c.planActual.periodicidad.toLowerCase()})`,
-  },
-  {
-    key: "fecha",
-    label: "Fecha estimada",
-    render: (c) =>
-      c.proximaRenovacion ? new Date(c.proximaRenovacion).toLocaleDateString("es-PE") : "—",
-  },
-  {
-    key: "segmento",
-    label: "Segmento",
-    render: (c) => <SegmentoPill segmento={c.segmentoEfectivo} manual={!!c.segmentoManual} />,
-  },
-  {
-    key: "pago",
-    label: "Pago",
-    align: "center",
-    render: (c) =>
-      yaPagoProximoCiclo(c) ? (
-        <Badge tone="success">Ya pagó</Badge>
-      ) : (
-        <Badge tone="warning">Pendiente</Badge>
-      ),
-  },
-  {
-    key: "ingresos",
-    label: "Ingresos mensuales (real)",
-    align: "right",
-    render: (c) =>
-      c.ingresoMensualReal == null ? "—" : formatCurrency(c.ingresoMensualReal),
-  },
-  { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
-  ];
-}
-
-const columnasExportProximas: ExportColumn<PostVentaCliente>[] = [
-  { header: "Cliente", value: (c) => c.nombreCliente },
-  { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
-  { header: "Plan", value: (c) => c.planActual.nombre },
-  { header: "Periodicidad", value: (c) => c.planActual.periodicidad },
-  { header: "Vence en (días)", value: (c) => c.diasParaRenovacion ?? "" },
-  {
-    header: "Fecha estimada",
-    value: (c) => (c.proximaRenovacion ? new Date(c.proximaRenovacion).toLocaleDateString("es-PE") : ""),
-  },
-  { header: "Segmento", value: (c) => c.segmentoEfectivo ?? "" },
-  { header: "Pago", value: (c) => (yaPagoProximoCiclo(c) ? "Ya pagó" : "Pendiente") },
-  { header: "Ingresos mensuales (real)", value: (c) => c.ingresoMensualReal ?? "" },
-  { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
-];
-
-function columnasVencidas(
-  onAbrirAcciones: (numeroDocumentoCliente: string) => void
-): DataTableColumn<PostVentaCliente>[] {
-  return [
-  columnaAccionesCliente<PostVentaCliente>((c) => c.numeroDocumentoCliente, onAbrirAcciones),
-  { key: "vencido", label: "Vencido hace", sortable: true, render: (c) => vencidaBadge(c.diasVencido) },
-  {
-    key: "cliente",
-    label: "Cliente",
-    render: (c) => (
-      <ClienteCell
-        numeroDocumentoCliente={c.numeroDocumentoCliente}
-        nombreCliente={c.nombreCliente}
-        sistemas={c.sistemas}
-      />
-    ),
-  },
-  {
-    key: "plan",
-    label: "Plan",
-    render: (c) => `${c.planActual.nombre} (${c.planActual.periodicidad.toLowerCase()})`,
-  },
-  {
-    key: "vencidoDesde",
-    label: "Vencido desde",
-    render: (c) => (c.vencidoDesde ? new Date(c.vencidoDesde).toLocaleDateString("es-PE") : "—"),
-  },
-  {
-    key: "estadoApiWorking",
-    label: "Estado",
-    render: (c) => c.ordenVigente.nEstadoApiWorking,
-  },
-  {
-    key: "ingresos",
-    label: "Ingresos mensuales (real)",
-    align: "right",
-    render: (c) =>
-      c.ingresoMensualReal == null ? "—" : formatCurrency(c.ingresoMensualReal),
-  },
-  {
-    key: "deuda",
-    label: "Deuda actual",
-    align: "right",
-    render: (c) => (
-      <span style={c.deudaTotal > 0 ? { color: "var(--color-critical)", fontWeight: 600 } : undefined}>
-        {formatCurrency(c.deudaTotal)}
-      </span>
-    ),
-  },
-  { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ordenVigente.ejecutivo ?? "—" },
-  ];
-}
-
-const columnasExportVencidas: ExportColumn<PostVentaCliente>[] = [
-  { header: "Cliente", value: (c) => c.nombreCliente },
-  { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
-  { header: "Plan", value: (c) => c.planActual.nombre },
-  { header: "Vencido hace (días)", value: (c) => c.diasVencido ?? "" },
-  {
-    header: "Vencido desde",
-    value: (c) => (c.vencidoDesde ? new Date(c.vencidoDesde).toLocaleDateString("es-PE") : ""),
-  },
-  { header: "Estado", value: (c) => c.ordenVigente.nEstadoApiWorking },
-  { header: "Ingresos mensuales (real)", value: (c) => c.ingresoMensualReal ?? "" },
-  { header: "Deuda actual", value: (c) => c.deudaTotal },
-  { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
-];
-
-function columnasExportCobranzaMensual(mesSeleccionado: MesInfo): ExportColumn<PostVentaCliente>[] {
-  return [
-    { header: "Cliente", value: (c) => c.nombreCliente },
-    { header: "RUC/DNI", value: (c) => c.numeroDocumentoCliente },
-    {
-      header: mesSeleccionado.label,
-      value: (c) => resumenMesCliente(c, mesSeleccionado.anio, mesSeleccionado.mes).facturado,
-    },
-    { header: "Ejecutivo", value: (c) => c.ordenVigente.ejecutivo ?? "" },
-  ];
-}
-
 export function RenovacionesPage() {
-  const [vista, setVista] = useState<Vista>("proximas");
-  const [alcance, setAlcance] = useState<Alcance>("esteMes");
+  const { username } = useAuth();
+  const { data, loading, error } = useClientes({ pageSize: PAGE_SIZE });
+  const { data: bajas } = useResumenBajas();
+  const todos = useMemo(() => data?.data ?? [], [data]);
+
+  const [mesSeleccionado, setMesSeleccionado] = useState<MesInfo>(() => mesRelativo(new Date(), 0));
+  const [diaCorte, setDiaCorte] = useState<number>(() => new Date().getDate());
+  const ultimoDiaDelMes = ultimoDiaMes(mesSeleccionado).getDate();
+  const diaCorteClamped = Math.min(diaCorte, ultimoDiaDelMes);
+  const fechaCorte = useMemo(
+    () => new Date(mesSeleccionado.anio, mesSeleccionado.mes, diaCorteClamped),
+    [mesSeleccionado, diaCorteClamped]
+  );
+  const inicioMes = useMemo(() => primerDiaMes(mesSeleccionado), [mesSeleccionado]);
+  const finMes = useMemo(() => ultimoDiaMes(mesSeleccionado), [mesSeleccionado]);
+
+  function cambiarMes(offset: number) {
+    setMesSeleccionado((prev) => mesRelativo(new Date(prev.anio, prev.mes, 1), offset));
+  }
+  function irAHoy() {
+    const hoy = new Date();
+    setMesSeleccionado(mesRelativo(hoy, 0));
+    setDiaCorte(hoy.getDate());
+  }
+
+  const resumen = useMemo(() => calcularResumenMensual(todos, fechaCorte), [todos, fechaCorte]);
+  const anclaPendiente = useMemo(() => resumenAnclaPendiente(todos), [todos]);
+  const sinIngresos = useMemo(() => resumenSinIngresos(todos), [todos]);
+  const deudaArrastrada = useMemo(() => resumenDeudaArrastrada(todos, inicioMes), [todos, inicioMes]);
+  const sinDato = useMemo(() => contarSinDato(todos), [todos]);
+
+  const [tab, setTab] = useState<Tab>("no_pagaron");
+  const [segmentoFiltro, setSegmentoFiltro] = useState<SegmentoListaCobranza | "">("");
+  const [busqueda, setBusqueda] = useState("");
   const [periodicidadFiltro, setPeriodicidadFiltro] = useState<PeriodicidadFiltro>("");
-  // mesFuturoOffset: 0 = mes actual, 1 = +1 mes, -1 = mes pasado, etc. — a
-  // diferencia de "Ya vencidas" (que solo mira vencidos historicos sin
-  // resolver, no por mes) y "Cobranza Mensual" (que solo cubre clientes
-  // Mensual), este panel es el unico que da la foto completa "quien ya
-  // renovo / quien falto" de las 4 periodicidades para un mes cerrado —
-  // util para revisar como cerro el mes pasado, no solo mirar adelante.
-  const [mesFuturoOffset, setMesFuturoOffset] = useState(0);
-  const [panelAbierto, setPanelAbierto] = useState(true);
-  const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
-  // Sin filtro en el pedido: se trae todo una sola vez (el backend ya calcula
-  // renovacionEnAlerta/proximaRenovacion/ultimoVencimientoPago por cliente) y
-  // de ahi se derivan tanto los KPIs como ambas tablas.
-  const { data, loading, error } = useClientes({
-    sortBy: "diasParaRenovacion",
-    sortDir: "asc",
-    pageSize: PAGE_SIZE,
-  });
-
-  const ahora = useMemo(() => new Date(), [data]);
-  const todos = data?.data ?? [];
-  const sanas = useMemo(() => todos.filter((c) => c.diasParaRenovacion !== null && !esProblema(c)), [todos]);
-  const problema = useMemo(() => todos.filter(esProblema), [todos]);
-
-  const mesFuturo = useMemo(() => mesRelativo(ahora, mesFuturoOffset), [ahora, mesFuturoOffset]);
-
-  const resumenPorPeriodicidad = useMemo(
-    () => calcularResumenPorPeriodicidad(todos, mesFuturo),
-    [todos, mesFuturo]
-  );
-
-  // Lista de clientes detras del resumen por periodicidad — para que no se
-  // quede solo en numeros. "faltanRenovar" arranca seleccionado por ser el
-  // mas accionable (a quien hay que contactar).
-  const [vistaMesTipo, setVistaMesTipo] = useState<"yaRenovaron" | "faltanRenovar">("faltanRenovar");
-  const clientesResumenMes = useMemo(() => {
-    const relevantes = periodicidadFiltro
-      ? resumenPorPeriodicidad.filter((r) => r.periodicidad === periodicidadFiltro)
-      : resumenPorPeriodicidad;
-    const lista =
-      vistaMesTipo === "yaRenovaron"
-        ? relevantes.flatMap((r) => r.yaRenovaronClientes)
-        : relevantes.flatMap((r) => r.faltanRenovarClientes);
-    return [...lista].sort((a, b) => b.monto - a.monto);
-  }, [resumenPorPeriodicidad, vistaMesTipo, periodicidadFiltro]);
-  const columnasClientesResumen = useMemo(
-    () => columnasClientesResumenMes(vistaMesTipo, setClienteSeleccionado),
-    [vistaMesTipo]
-  );
-
-  const resumenTotal = useMemo(
-    () =>
-      resumenPorPeriodicidad.reduce(
-        (acc, r) => ({
-          yaRenovaronCount: acc.yaRenovaronCount + r.yaRenovaronCount,
-          yaRenovaronMonto: acc.yaRenovaronMonto + r.yaRenovaronMonto,
-          faltanRenovarCount: acc.faltanRenovarCount + r.faltanRenovarCount,
-          faltanRenovarMonto: acc.faltanRenovarMonto + r.faltanRenovarMonto,
-          totalEsperadoMonto: acc.totalEsperadoMonto + r.totalEsperadoMonto,
-        }),
-        {
-          yaRenovaronCount: 0,
-          yaRenovaronMonto: 0,
-          faltanRenovarCount: 0,
-          faltanRenovarMonto: 0,
-          totalEsperadoMonto: 0,
-        }
-      ),
-    [resumenPorPeriodicidad]
-  );
-
-  const filasProximas = useMemo(() => {
-    const base = periodicidadFiltro
-      ? sanas.filter((c) => c.planActual.periodicidad === periodicidadFiltro)
-      : sanas;
-    if (alcance === "ventana") return base.filter((c) => c.renovacionEnAlerta);
-    if (alcance === "esteMes") return base.filter((c) => esDeEsteMes(c.proximaRenovacion, ahora));
-    if (alcance === "mesEspecifico") return base.filter((c) => esDelMes(c.proximaRenovacion, mesFuturo));
-    return base;
-  }, [alcance, sanas, ahora, periodicidadFiltro, mesFuturo]);
-
-  const [ordenVencidas, setOrdenVencidas] = useState<"asc" | "desc">("desc");
-  const filasVencidas = useMemo(
-    () => [...problema].sort((a, b) => compararVencidos(a, b, ordenVencidas)),
-    [problema, ordenVencidas]
-  );
-
-  // Cobranza Mensual: solo clientes Mensual, sin importar si estan "sanos" o
-  // "en problema" — el objetivo aca es ver la foto completa de facturacion
-  // real mes a mes, no el filtro de riesgo de las otras pestañas.
-  const mensuales = useMemo(
-    () => todos.filter((c) => c.planActual.periodicidad === "MENSUAL"),
-    [todos]
-  );
-
-  // mesOffset: 0 = mes actual, -1 = mes anterior, etc. — nunca positivo, no
-  // tiene sentido navegar a un mes futuro sin datos.
-  const [mesOffset, setMesOffset] = useState(0);
-  const mesSeleccionado = useMemo(() => mesRelativo(ahora, mesOffset), [ahora, mesOffset]);
-  const esMesActual = mesOffset === 0;
-
-  // Ciclo de facturacion (dia real, ver diaCicloMensual) — confirmado con
-  // negocio (Fase 2) que solo aplica a clientes Mensual; Trimestral/
-  // Semestral/Anual no tienen un dia de ciclo identificable, por eso este
-  // filtro vive solo dentro de la pestaña Cobranza Mensual, no en las otras.
   const [cicloFiltro, setCicloFiltro] = useState<number | "">("");
-  const mensualesFiltrados = useMemo(
-    () => (cicloFiltro === "" ? mensuales : mensuales.filter((c) => c.diaCicloMensual === cicloFiltro)),
-    [mensuales, cicloFiltro]
+  const [page, setPage] = useState(1);
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
+  const [seguimientoFila, setSeguimientoFila] = useState<Fila | null>(null);
+  const [anclaPendienteAbierto, setAnclaPendienteAbierto] = useState(false);
+  const [sinIngresosAbierto, setSinIngresosAbierto] = useState(false);
+  const [deudaArrastradaAbierto, setDeudaArrastradaAbierto] = useState(false);
+  const [bajasAbierto, setBajasAbierto] = useState(false);
+
+  const [tareaFilaActual, setTareaFilaActual] = useState<Fila | null>(null);
+  const [tareaInicial, setTareaInicial] = useState<Partial<TareaFormValues>>({});
+  const [savingTarea, setSavingTarea] = useState(false);
+
+  useEffect(() => {
+    setPage(1);
+  }, [mesSeleccionado.anio, mesSeleccionado.mes, diaCorteClamped, tab, segmentoFiltro, busqueda, periodicidadFiltro, cicloFiltro]);
+
+  // Base sin periodicidad/ciclo (solo mes+corte+busqueda) — punto de partida
+  // para calcular los facets de ambas botoneras de forma independiente.
+  const baseSinPeriodicidadNiCiclo = useMemo(() => {
+    let base: Fila[] = [];
+    for (const cliente of todos) {
+      const clase = claseCobranzaMes(cliente, fechaCorte, inicioMes, finMes);
+      if (clase) base.push({ cliente, clase });
+    }
+    if (busqueda.trim()) {
+      const q = busqueda.trim().toLowerCase();
+      base = base.filter(
+        (f) => f.cliente.nombreCliente.toLowerCase().includes(q) || f.cliente.numeroDocumentoCliente.includes(q)
+      );
+    }
+    return base;
+  }, [todos, fechaCorte, inicioMes, finMes, busqueda]);
+
+  // + pestaña (no_pagaron/ya_pagaron) + segmento — todavia sin periodicidad
+  // ni ciclo, para que esas dos botoneras puedan calcularse una independiente
+  // de la otra.
+  const baseTab = useMemo(() => {
+    let base =
+      tab === "ya_pagaron"
+        ? baseSinPeriodicidadNiCiclo.filter((f) => f.clase === "pagado")
+        : baseSinPeriodicidadNiCiclo.filter((f) => f.clase !== "pagado");
+    if (tab === "no_pagaron" && segmentoFiltro) {
+      base = base.filter((f) => segmentoListaCobranza(f.cliente, f.clase, fechaCorte) === segmentoFiltro);
+    }
+    return base;
+  }, [baseSinPeriodicidadNiCiclo, tab, segmentoFiltro, fechaCorte]);
+
+  function acumularFacet(map: Map<string, FacetStats>, key: string, monto: number) {
+    const cur = map.get(key) ?? { count: 0, monto: 0 };
+    cur.count += 1;
+    cur.monto += monto;
+    map.set(key, cur);
+  }
+
+  // Facet de periodicidad: baseTab filtrada por CICLO (no por periodicidad) —
+  // asi el boton "Trimestral" muestra cuantos habria si lo eligiera, dado el
+  // ciclo ya elegido.
+  const facetPeriodicidad = useMemo(() => {
+    const base = cicloFiltro === "" ? baseTab : baseTab.filter((f) => f.cliente.diaCicloMensual === cicloFiltro);
+    const map = new Map<PeriodicidadFiltro, FacetStats>();
+    for (const f of base) {
+      const monto = montoRealCiclo(f.cliente) ?? 0;
+      acumularFacet(map, "", monto);
+      if (f.cliente.planActual.periodicidad !== "DESCONOCIDO") acumularFacet(map, f.cliente.planActual.periodicidad, monto);
+    }
+    return map;
+  }, [baseTab, cicloFiltro]);
+
+  // Facet de ciclo: baseTab filtrada por PERIODICIDAD (no por ciclo).
+  const facetCiclo = useMemo(() => {
+    const base = periodicidadFiltro ? baseTab.filter((f) => f.cliente.planActual.periodicidad === periodicidadFiltro) : baseTab;
+    const map = new Map<string, FacetStats>();
+    for (const f of base) {
+      const monto = montoRealCiclo(f.cliente) ?? 0;
+      acumularFacet(map, "", monto);
+      if (f.cliente.diaCicloMensual !== null) acumularFacet(map, String(f.cliente.diaCicloMensual), monto);
+    }
+    return map;
+  }, [baseTab, periodicidadFiltro]);
+
+  // Facet de segmento (dentro de "No pagaron"): igual patron, calculado
+  // sobre periodicidad+ciclo ya elegidos pero sin el segmento mismo.
+  const facetSegmento = useMemo(() => {
+    const base =
+      tab === "no_pagaron"
+        ? baseSinPeriodicidadNiCiclo
+            .filter((f) => f.clase !== "pagado")
+            .filter((f) => !periodicidadFiltro || f.cliente.planActual.periodicidad === periodicidadFiltro)
+            .filter((f) => cicloFiltro === "" || f.cliente.diaCicloMensual === cicloFiltro)
+        : [];
+    const map = new Map<SegmentoListaCobranza | "", FacetStats>();
+    for (const f of base) {
+      const monto = montoRealCiclo(f.cliente) ?? 0;
+      acumularFacet(map, "", monto);
+      const seg = segmentoListaCobranza(f.cliente, f.clase, fechaCorte);
+      if (seg) acumularFacet(map, seg, monto);
+    }
+    return map;
+  }, [baseSinPeriodicidadNiCiclo, tab, periodicidadFiltro, cicloFiltro, fechaCorte]);
+
+  const totalNoPagaron = facetSegmento.get("")?.count ?? 0;
+  const totalYaPagaron = useMemo(() => {
+    return baseSinPeriodicidadNiCiclo
+      .filter((f) => f.clase === "pagado")
+      .filter((f) => !periodicidadFiltro || f.cliente.planActual.periodicidad === periodicidadFiltro)
+      .filter((f) => cicloFiltro === "" || f.cliente.diaCicloMensual === cicloFiltro).length;
+  }, [baseSinPeriodicidadNiCiclo, periodicidadFiltro, cicloFiltro]);
+
+  // Filas realmente mostradas: baseTab + AMBOS filtros (periodicidad y ciclo).
+  const filasTab = useMemo(() => {
+    let base = baseTab;
+    if (periodicidadFiltro) base = base.filter((f) => f.cliente.planActual.periodicidad === periodicidadFiltro);
+    if (cicloFiltro !== "") base = base.filter((f) => f.cliente.diaCicloMensual === cicloFiltro);
+    return [...base].sort(compararFilas);
+  }, [baseTab, periodicidadFiltro, cicloFiltro]);
+
+  const filasPagina = useMemo(
+    () => filasTab.slice((page - 1) * TABLA_PAGE_SIZE, page * TABLA_PAGE_SIZE),
+    [filasTab, page]
   );
-  const subtotalesPorCiclo = useMemo(() => {
-    const grupos = new Map<number | "otros", { count: number; monto: number }>();
-    for (const c of mensuales) {
-      const clave: number | "otros" =
-        c.diaCicloMensual !== null && CICLOS_CONOCIDOS.includes(c.diaCicloMensual)
-          ? c.diaCicloMensual
-          : "otros";
-      const actual = grupos.get(clave) ?? { count: 0, monto: 0 };
-      actual.count += 1;
-      actual.monto += c.ingresoMensualReal ?? 0;
-      grupos.set(clave, actual);
-    }
-    return grupos;
-  }, [mensuales]);
 
-  const cobranzaMensual = useMemo(() => {
-    let facturado = 0;
-    let pagado = 0;
-    let conDeuda = 0;
-    let clientesConComprobante = 0;
-    const estados: Record<EstadoMes, number> = {
-      PAGADO: 0,
-      DEBE: 0,
-      PENDIENTE: 0,
-      VENCIDO_SIN_FACTURAR: 0,
-      SIN_COMPROBANTE: 0,
-    };
-    for (const c of mensualesFiltrados) {
-      const r = resumenMesCliente(c, mesSeleccionado.anio, mesSeleccionado.mes);
-      if (r.tieneComprobante) {
-        clientesConComprobante += 1;
-        facturado += r.facturado;
-        if (r.deuda > 0) conDeuda += r.deuda;
-        else pagado += r.facturado;
-      }
-      estados[estadoDelMes(c, mesSeleccionado, ahora, esMesActual)] += 1;
-    }
-    return {
-      facturado,
-      pagado,
-      conDeuda,
-      clientesConComprobante,
-      estados,
-    };
-  }, [mensualesFiltrados, mesSeleccionado, ahora, esMesActual]);
+  function handleCrearTareaDesdeFila(fila: Fila) {
+    setTareaFilaActual(fila);
+    setTareaInicial({
+      titulo: `Gestionar cobranza: ${fila.cliente.nombreCliente}`,
+      descripcion: `${fila.cliente.planActual.nombre || "Plan"} — ${fechaEsperadaTexto(fila.cliente)}.`,
+      responsable: fila.cliente.ordenVigente.ejecutivo ?? username ?? "",
+      prioridad: fila.clase === "vencido_este_mes" ? "ALTA" : "MEDIA",
+      tipo: "COBRANZA",
+    });
+  }
 
-  const columnasCobranza = useMemo(
-    () => columnasCobranzaMensual(mesSeleccionado, ahora, esMesActual, setClienteSeleccionado),
-    [mesSeleccionado, ahora, esMesActual]
+  async function handleSubmitTarea(values: TareaFormValues) {
+    if (!tareaFilaActual) return;
+    setSavingTarea(true);
+    try {
+      await createTarea({
+        numeroDocumentoCliente: tareaFilaActual.cliente.numeroDocumentoCliente,
+        idOrdenServicio: tareaFilaActual.cliente.ordenVigente.idOrdenServicio,
+        tipo: values.tipo,
+        origen: "RENOVACION",
+        origenEntidadTipo: "CLIENTE",
+        origenEntidadId: tareaFilaActual.cliente.numeroDocumentoCliente,
+        titulo: values.titulo,
+        descripcion: values.descripcion || null,
+        responsable: values.responsable,
+        prioridad: values.prioridad,
+        fechaVencimiento: values.fechaVencimiento || null,
+      });
+      setTareaFilaActual(null);
+    } finally {
+      setSavingTarea(false);
+    }
+  }
+
+  const columnas = useMemo(
+    () => columnasCobranza(fechaCorte, setClienteSeleccionado, handleCrearTareaDesdeFila, setSeguimientoFila),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleCrearTareaDesdeFila solo lee username/setState, no necesita disparar un recalculo de columnas
+    [fechaCorte]
   );
 
-  // Datos a exportar segun la pestaña activa (Proxima/Vencidas/Cobranza
-  // Mensual) — las 3 comparten PostVentaCliente como fila, asi que un solo
-  // botonera de export sirve para las 3 sin repetir el bloque de botones.
-  const exportVistaActual = useMemo(() => {
-    if (vista === "vencidas") {
-      return {
-        filas: filasVencidas,
-        columnas: columnasExportVencidas,
-        nombreArchivo: "renovaciones_ya_vencidas",
-        titulo: "Renovaciones — Ya vencidas",
-      };
-    }
-    if (vista === "cobranzaMensual") {
-      return {
-        filas: mensualesFiltrados,
-        columnas: columnasExportCobranzaMensual(mesSeleccionado),
-        nombreArchivo: `cobranza_mensual_${mesSeleccionado.label.replace(/\s+/g, "_")}${cicloFiltro ? `_ciclo${cicloFiltro}` : ""}`,
-        titulo: `Cobranza Mensual — ${mesSeleccionado.label}${cicloFiltro ? ` — Ciclo ${String(cicloFiltro).padStart(2, "0")}` : ""}`,
-      };
-    }
-    return {
-      filas: filasProximas,
-      columnas: columnasExportProximas,
-      nombreArchivo: "renovaciones_proximas_a_vencer",
-      titulo: "Renovaciones — Próximas a vencer",
-    };
-  }, [vista, filasProximas, filasVencidas, mensualesFiltrados, mesSeleccionado, cicloFiltro]);
+  function verListaAnclaPendiente() {
+    setAnclaPendienteAbierto(true);
+    document.getElementById("renovaciones-avisos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function verListaSinIngresos() {
+    setSinIngresosAbierto(true);
+    document.getElementById("renovaciones-avisos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function verListaDeudaArrastrada() {
+    setDeudaArrastradaAbierto(true);
+    document.getElementById("renovaciones-avisos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function verListaBajas() {
+    setBajasAbierto(true);
+    document.getElementById("renovaciones-avisos")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div>
@@ -855,432 +491,372 @@ export function RenovacionesPage() {
         <div>
           <h1>Renovaciones</h1>
           <div className="page-header-subtitle">
-            Próximo vencimiento de pago por cliente — asegurar el ingreso de los que vienen al
-            día, y priorizar cobranza en los que ya están vencidos.
+            Cobranza del mes seleccionado — quién debe pagar y cuánto, al corte elegido.
           </div>
         </div>
       </div>
 
-      <CollapsibleCard
-        titulo="Renovaciones por periodicidad"
-        subtitulo={
-          <span style={{ textTransform: "capitalize" }}>
-            {mesFuturo.label}
-            {mesFuturoOffset === 0 && " (mes actual)"}
-          </span>
-        }
-        abierto={panelAbierto}
-        onToggle={() => setPanelAbierto((v) => !v)}
-        contador={resumenTotal.faltanRenovarCount}
-        tone={resumenTotal.faltanRenovarCount > 0 ? "warning" : "success"}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 16,
-          }}
-        >
-          <p className="muted" style={{ margin: 0, maxWidth: 560 }}>
-            Quiénes ya renovaron este ciclo y quiénes todavía faltan, por tipo de plan —
-            incluye planes trimestrales, semestrales y anuales, no solo mensuales. Monto
-            cobrado según comprobantes reales, monto pendiente estimado según ingreso
-            mensual real.
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setMesFuturoOffset((o) => o - 1)}
-            >
+      <p className="muted renovaciones-trazabilidad">
+        Origen: fechas y montos calculados a partir del ciclo de facturación y el último comprobante
+        real emitido en APIWorking (sin proyección de precio: se asume el mismo monto del último
+        ciclo).
+        {data?.generatedAt && <> · Datos actualizados: {new Date(data.generatedAt).toLocaleString("es-PE")}</>}
+      </p>
+
+      {error && <p className="error-text">{error}</p>}
+
+      {/* ---------------------------------------------------------------- */}
+      {/* Mes seleccionado + fecha de corte                                 */}
+      {/* ---------------------------------------------------------------- */}
+      <section className="card renovaciones-selector">
+        <div className="renovaciones-selector-row">
+          <div className="renovaciones-mes-nav">
+            <button type="button" className="btn btn-secondary" onClick={() => cambiarMes(-1)} aria-label="Mes anterior">
               ← Mes anterior
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setMesFuturoOffset((o) => o + 1)}
-            >
+            <strong style={{ textTransform: "capitalize", minWidth: 160, textAlign: "center" }}>{mesSeleccionado.label}</strong>
+            <button type="button" className="btn btn-secondary" onClick={() => cambiarMes(1)} aria-label="Mes siguiente">
               Mes siguiente →
             </button>
           </div>
+          <div className="field">
+            <label htmlFor="renovaciones-fecha-corte">Fecha de corte (dentro del mes elegido)</label>
+            <input
+              id="renovaciones-fecha-corte"
+              type="date"
+              min={fechaInputValue(inicioMes)}
+              max={fechaInputValue(finMes)}
+              value={fechaInputValue(fechaCorte)}
+              onChange={(event) => {
+                const dia = Number(event.target.value.split("-")[2]);
+                if (!Number.isNaN(dia)) setDiaCorte(dia);
+              }}
+            />
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={irAHoy}>
+            Hoy
+          </button>
         </div>
+      </section>
 
-        <div className="kpi-grid" style={{ marginTop: 16 }}>
+      {/* ---------------------------------------------------------------- */}
+      {/* Resumen superior — 5 cifras, mismo mes+corte                      */}
+      {/* ---------------------------------------------------------------- */}
+      <section className="card renovaciones-grupo">
+        <h2>Cobranza de {mesSeleccionado.label}</h2>
+        <div className="kpi-grid">
           <KpiCard
-            label="Ya renovaron"
-            value={resumenTotal.yaRenovaronCount}
-            hint={`${formatCurrency(resumenTotal.yaRenovaronMonto)} cobrados`}
+            label="Cobrado del mes"
+            value={formatCurrency(resumen.cobradoDelMes.monto)}
+            hint={`${formatNumber(resumen.cobradoDelMes.count)} cliente(s) con pago comparable a su renovación`}
             tone="success"
           />
           <KpiCard
-            label="Faltan renovar"
-            value={resumenTotal.faltanRenovarCount}
-            hint={`${formatCurrency(resumenTotal.faltanRenovarMonto)} pendientes (estimado)`}
-            tone={resumenTotal.faltanRenovarCount > 0 ? "warning" : undefined}
+            label={resumen.esCorteHoy ? "Vencen hoy" : `Vencen el ${fmtFecha(fechaCorte)}`}
+            value={formatCurrency(resumen.venceHoy.monto)}
+            hint={`${formatNumber(resumen.venceHoy.sistemas)} sistema(s) · ${formatNumber(resumen.venceHoy.count)} cliente(s)`}
           />
           <KpiCard
-            label="Total esperado del mes"
-            value={formatCurrency(resumenTotal.totalEsperadoMonto)}
-            hint="Ya cobrado + pendiente estimado"
+            label="Vencidos este mes"
+            value={formatCurrency(resumen.vencidosEsteMes.monto)}
+            hint={`${formatNumber(resumen.vencidosEsteMes.sistemas)} sistema(s) · ${formatNumber(resumen.vencidosEsteMes.count)} cliente(s) — antes del corte, sin pago`}
+            tone={resumen.vencidosEsteMes.count > 0 ? "critical" : undefined}
+          />
+          <KpiCard
+            label="Por cobrar del mes"
+            value={formatCurrency(resumen.porCobrarDelMes.monto)}
+            hint={`${formatNumber(resumen.porCobrarDelMes.sistemas)} sistema(s) · ${formatNumber(resumen.porCobrarDelMes.count)} cliente(s) — vencidas + hoy + próximas`}
+            tone="warning"
+          />
+          <KpiCard
+            label="Esperado total del mes"
+            value={formatCurrency(resumen.esperadoTotalDelMes.monto)}
+            hint={`Cobrado (${formatCurrency(resumen.cobradoDelMes.monto)}) + Por cobrar (${formatCurrency(resumen.porCobrarDelMes.monto)}) · ${formatNumber(resumen.esperadoTotalDelMes.count)} cliente(s)`}
           />
         </div>
-
-        <div style={{ marginTop: 16 }}>
-          <DataTable
-            columns={columnasResumenPeriodicidad}
-            rows={resumenPorPeriodicidad}
-            rowKey={(r) => r.periodicidad}
-            loading={loading}
-            emptyMessage="Sin datos."
-          />
-        </div>
-
-        <div style={{ marginTop: 24 }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              marginBottom: 12,
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                className={vistaMesTipo === "faltanRenovar" ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setVistaMesTipo("faltanRenovar")}
-              >
-                Faltan renovar ({resumenTotal.faltanRenovarCount})
-              </button>
-              <button
-                type="button"
-                className={vistaMesTipo === "yaRenovaron" ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setVistaMesTipo("yaRenovaron")}
-              >
-                Ya renovaron ({resumenTotal.yaRenovaronCount})
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <select
-                aria-label="Filtrar por periodicidad"
-                value={periodicidadFiltro}
-                onChange={(event) => setPeriodicidadFiltro(event.target.value as PeriodicidadFiltro)}
-              >
-                <option value="">Todas las periodicidades</option>
-                <option value="MENSUAL">Mensual</option>
-                <option value="TRIMESTRAL">Trimestral</option>
-                <option value="SEMESTRAL">Semestral</option>
-                <option value="ANUAL">Anual</option>
-              </select>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => exportarClientesCsv(clientesResumenMes, vistaMesTipo, mesFuturo.label)}
-                disabled={clientesResumenMes.length === 0}
-              >
-                CSV
-              </button>
-              <ExportButtons
-                disabled={clientesResumenMes.length === 0}
-                onExcel={() =>
-                  exportarExcel(
-                    `renovaciones_${vistaMesTipo}_${mesFuturo.label.replace(/\s+/g, "_")}`,
-                    columnasExportResumenMes(vistaMesTipo),
-                    clientesResumenMes
-                  )
-                }
-                onPdf={() =>
-                  exportarPdf(
-                    `renovaciones_${vistaMesTipo}_${mesFuturo.label.replace(/\s+/g, "_")}`,
-                    `Renovaciones — ${vistaMesTipo === "yaRenovaron" ? "Ya renovaron" : "Faltan renovar"} — ${mesFuturo.label}`,
-                    columnasExportResumenMes(vistaMesTipo),
-                    clientesResumenMes
-                  )
-                }
-              />
-            </div>
-          </div>
-          <DataTable
-            columns={columnasClientesResumen}
-            rows={clientesResumenMes}
-            rowKey={(r) => `${r.cliente.numeroDocumentoCliente}-${r.periodicidad}`}
-            loading={loading}
-            emptyMessage={
-              vistaMesTipo === "faltanRenovar"
-                ? "No hay clientes pendientes de renovar en este mes."
-                : "Todavía no hay clientes que hayan renovado en este mes."
-            }
-          />
-        </div>
-      </CollapsibleCard>
-
-      {vista === "cobranzaMensual" && (
-        <>
-          <p className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
-            Solo clientes Mensual ({formatNumber(mensuales.length)}) — se facturan todos los meses,
-            así que cualquier mes es directamente comparable con otro. Todo sale de comprobantes
-            reales ya emitidos, nunca se proyecta un monto inventado.
-          </p>
-
-          <div className="modulo-clientes-periodo" style={{ marginBottom: 8 }}>
-            <button
-              type="button"
-              className={cicloFiltro === "" ? "btn btn-primary" : "btn btn-secondary"}
-              onClick={() => setCicloFiltro("")}
-            >
-              Todos
-            </button>
-            {CICLOS_CONOCIDOS.map((dia) => (
-              <button
-                key={dia}
-                type="button"
-                className={cicloFiltro === dia ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setCicloFiltro(dia)}
-              >
-                Ciclo {String(dia).padStart(2, "0")}
-                {subtotalesPorCiclo.has(dia) ? ` (${subtotalesPorCiclo.get(dia)!.count})` : " (0)"}
-              </button>
-            ))}
-          </div>
-          {subtotalesPorCiclo.has("otros") && (
-            <p className="muted" style={{ marginTop: 0, marginBottom: 16, fontSize: "0.85rem" }}>
-              {subtotalesPorCiclo.get("otros")!.count} cliente(s) Mensual sin ciclo 01/12/22
-              identificable (otro día, o APIWorking no trae un día parseable) — no se pierden, quedan
-              visibles con "Todos" pero no entran en ningún botón de ciclo.
-            </p>
-          )}
-          {cicloFiltro !== "" && (
-            <p className="muted" style={{ marginTop: 0, marginBottom: 16, fontSize: "0.85rem" }}>
-              Subtotal ciclo {String(cicloFiltro).padStart(2, "0")}:{" "}
-              {formatNumber(subtotalesPorCiclo.get(cicloFiltro)?.count ?? 0)} cliente(s) ·{" "}
-              {formatCurrency(subtotalesPorCiclo.get(cicloFiltro)?.monto ?? 0)} en ingresos mensuales
-            </p>
-          )}
-
-          <div
-            className="card"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexWrap: "wrap",
-              gap: 16,
-              padding: "12px 16px",
-              marginBottom: 16,
-            }}
-          >
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setMesOffset((o) => o - 1)}
-            >
-              ← Mes anterior
-            </button>
-            <strong
-              style={{
-                fontSize: 16,
-                textTransform: "capitalize",
-                minWidth: 180,
-                textAlign: "center",
-              }}
-            >
-              {mesSeleccionado.label}
-              {esMesActual && " (en curso)"}
-            </strong>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => setMesOffset((o) => o + 1)}
-              disabled={esMesActual}
-            >
-              Mes siguiente →
-            </button>
-          </div>
-
-          <div className="kpi-grid">
-            <KpiCard
-              label={`Facturado — ${mesSeleccionado.label}`}
-              value={formatCurrency(cobranzaMensual.facturado)}
-              hint={`${formatNumber(cobranzaMensual.clientesConComprobante)} de ${formatNumber(mensualesFiltrados.length)} clientes con comprobante${esMesActual ? " hasta hoy" : " ese mes"}`}
-            />
-            <KpiCard
-              label="Pagado"
-              value={cobranzaMensual.estados.PAGADO}
-              hint={formatCurrency(cobranzaMensual.pagado)}
-              tone="success"
-            />
-            <KpiCard
-              label="Debe"
-              value={cobranzaMensual.estados.DEBE}
-              hint={formatCurrency(cobranzaMensual.conDeuda)}
-              tone={cobranzaMensual.estados.DEBE > 0 ? "critical" : undefined}
-            />
-            {esMesActual ? (
-              <>
-                <KpiCard
-                  label="Pendiente de facturar"
-                  value={cobranzaMensual.estados.PENDIENTE}
-                  hint="Todavía no le toca — su fecha de cobro de este mes no llegó"
-                />
-                <KpiCard
-                  label="Vencido sin facturar"
-                  value={cobranzaMensual.estados.VENCIDO_SIN_FACTURAR}
-                  hint="Ya pasó su fecha de cobro de este mes y no le llegó ningún comprobante"
-                  tone={cobranzaMensual.estados.VENCIDO_SIN_FACTURAR > 0 ? "critical" : undefined}
-                />
-              </>
-            ) : (
-              <KpiCard
-                label="Sin comprobante ese mes"
-                value={cobranzaMensual.estados.SIN_COMPROBANTE}
-                hint="No se le emitió ningún comprobante en ese mes"
-              />
-            )}
-          </div>
-        </>
-      )}
-
-      <div className="clientes-toolbar" style={{ marginBottom: 12, marginTop: 20 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className={vista === "proximas" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setVista("proximas")}
-          >
-            Próximas a vencer ({sanas.length})
-          </button>
-          <button
-            type="button"
-            className={vista === "vencidas" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setVista("vencidas")}
-          >
-            Ya vencidas ({problema.length})
-          </button>
-          <button
-            type="button"
-            className={vista === "cobranzaMensual" ? "btn btn-primary" : "btn btn-secondary"}
-            onClick={() => setVista("cobranzaMensual")}
-          >
-            Cobranza Mensual ({mensuales.length})
-          </button>
-        </div>
-      </div>
-
-      {vista === "proximas" && (
-        <>
-          <FilterBar>
-            <div className="field">
-              <label htmlFor="renovaciones-alcance">Alcance</label>
-              <select
-                id="renovaciones-alcance"
-                value={alcance}
-                onChange={(event) => setAlcance(event.target.value as Alcance)}
-              >
-                <option value="esteMes">Este mes calendario</option>
-                <option value="mesEspecifico">Elegir un mes (incluye futuros)</option>
-                <option value="ventana">Dentro de la ventana de aviso (según periodicidad)</option>
-                <option value="todos">Todo el horizonte calculado</option>
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="renovaciones-periodicidad">Periodicidad</label>
-              <select
-                id="renovaciones-periodicidad"
-                value={periodicidadFiltro}
-                onChange={(event) => setPeriodicidadFiltro(event.target.value as PeriodicidadFiltro)}
-              >
-                <option value="">Todas</option>
-                <option value="MENSUAL">Mensual</option>
-                <option value="TRIMESTRAL">Trimestral</option>
-                <option value="SEMESTRAL">Semestral</option>
-                <option value="ANUAL">Anual</option>
-              </select>
-            </div>
-          </FilterBar>
-
-          {alcance === "mesEspecifico" && (
-            <p className="muted" style={{ marginTop: -8, marginBottom: 16 }}>
-              Mostrando <strong style={{ textTransform: "capitalize" }}>{mesFuturo.label}</strong> —
-              usa los botones de "Mes anterior"/"Mes siguiente" del panel de arriba para cambiar
-              de mes.
-            </p>
-          )}
-        </>
-      )}
-
-      {error && <p className="error-text">{error}</p>}
-      {data && data.data.length >= PAGE_SIZE && data.total > PAGE_SIZE && (
-        <p className="muted" style={{ marginBottom: 12 }}>
-          Hay más de {PAGE_SIZE} clientes en la cartera — esta pantalla solo trae los primeros{" "}
-          {PAGE_SIZE}.
+        <p className="muted renovaciones-nota">
+          Pagos generales del mes: {formatCurrency(resumen.pagosGeneralesDelMes)} — bruto, todos los
+          comprobantes de renovación emitidos en el mes, informativo, nunca mezclado con "cobrado del
+          mes".
         </p>
-      )}
+      </section>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <ExportButtons
-          disabled={exportVistaActual.filas.length === 0}
-          onExcel={() =>
-            exportarExcel(exportVistaActual.nombreArchivo, exportVistaActual.columnas, exportVistaActual.filas)
-          }
-          onPdf={() =>
-            exportarPdf(
-              exportVistaActual.nombreArchivo,
-              exportVistaActual.titulo,
-              exportVistaActual.columnas,
-              exportVistaActual.filas
-            )
-          }
-        />
+      {/* ---------------------------------------------------------------- */}
+      {/* Avisos secundarios — nunca mezclados en el resumen de arriba      */}
+      {/* ---------------------------------------------------------------- */}
+      <div id="renovaciones-avisos">
+        {(anclaPendiente.count > 0 || sinDato > 0) && (
+          <div className="renovaciones-calidad-aviso">
+            <Badge tone="pending">🔍 Calidad de datos</Badge>
+            <span>
+              {anclaPendiente.count > 0 && (
+                <>
+                  {formatNumber(anclaPendiente.count)} cliente(s) sin ancla confiable (ciclo pagado en
+                  cuotas o sin comprobante de renovación real)
+                  {anclaPendiente.monto > 0 && <> ({formatCurrency(anclaPendiente.monto)})</>}.{" "}
+                  <button type="button" className="btn-link-inline" onClick={verListaAnclaPendiente}>
+                    Ver lista
+                  </button>
+                </>
+              )}
+              {sinDato > 0 && <> · {formatNumber(sinDato)} cliente(s) sin periodicidad o comprobante histórico.</>}
+            </span>
+          </div>
+        )}
+
+        {sinIngresos.count > 0 && (
+          <div className="renovaciones-calidad-aviso">
+            <Badge tone="pending">⚪ Estado sin ingresos</Badge>
+            <span>
+              {formatNumber(sinIngresos.count)} cliente(s) en estado demo/inactivo/pendiente de
+              activación — no se sabe si generarán ingreso
+              {sinIngresos.monto > 0 && <> (deuda actual: {formatCurrency(sinIngresos.monto)})</>}.{" "}
+              <button type="button" className="btn-link-inline" onClick={verListaSinIngresos}>
+                Ver lista
+              </button>
+            </span>
+          </div>
+        )}
+
+        {deudaArrastrada.count > 0 && (
+          <div className="renovaciones-calidad-aviso">
+            <Badge tone="critical">⏳ Deuda arrastrada</Badge>
+            <span>
+              {formatNumber(deudaArrastrada.sistemas)} sistema(s) · {formatNumber(deudaArrastrada.count)}{" "}
+              cliente(s) vencidos de <strong>meses anteriores</strong> a {mesSeleccionado.label} (
+              {formatCurrency(deudaArrastrada.monto)}) — nunca mezclada con "vencidos este mes".{" "}
+              <button type="button" className="btn-link-inline" onClick={verListaDeudaArrastrada}>
+                Ver lista
+              </button>
+            </span>
+          </div>
+        )}
+
+        {bajas && bajas.excluidosPorFaltaDePago.count > 0 && (
+          <div className="renovaciones-calidad-aviso">
+            <Badge tone="pending">🚪 Bajas excluidas</Badge>
+            <span>
+              {formatNumber(bajas.excluidosPorFaltaDePago.count)} cliente(s) dados de baja hace más de{" "}
+              {bajas.umbralDias} días con deuda pendiente ({formatCurrency(bajas.excluidosPorFaltaDePago.monto)}
+              ) — posible falta de pago, pero el sistema no registra un motivo de baja confirmado
+              (pendiente de validación).{" "}
+              <button type="button" className="btn-link-inline" onClick={verListaBajas}>
+                Ver lista
+              </button>
+            </span>
+          </div>
+        )}
+
+        {anclaPendiente.count > 0 && (
+          <CollapsibleCard
+            titulo="Ciclos sin ancla confiable"
+            abierto={anclaPendienteAbierto}
+            onToggle={() => setAnclaPendienteAbierto((v) => !v)}
+            contador={anclaPendiente.count}
+            tone="pending"
+          >
+            <MiniListaClientes
+              clientes={anclaPendiente.clientes}
+              monto={(c) => montoRealCiclo(c) ?? 0}
+              motivo={() => "Sin comprobante de renovación real — ancla no confirmada"}
+            />
+          </CollapsibleCard>
+        )}
+
+        {sinIngresos.count > 0 && (
+          <CollapsibleCard
+            titulo="Clientes en estado sin ingresos"
+            abierto={sinIngresosAbierto}
+            onToggle={() => setSinIngresosAbierto((v) => !v)}
+            contador={sinIngresos.count}
+            tone="pending"
+          >
+            <MiniListaClientes
+              clientes={sinIngresos.clientes}
+              monto={(c) => c.deudaTotal}
+              motivo={(c) => c.ordenVigente.nEstadoApiWorking}
+            />
+          </CollapsibleCard>
+        )}
+
+        {deudaArrastrada.count > 0 && (
+          <CollapsibleCard
+            titulo="Deuda arrastrada de meses anteriores"
+            abierto={deudaArrastradaAbierto}
+            onToggle={() => setDeudaArrastradaAbierto((v) => !v)}
+            contador={deudaArrastrada.count}
+            tone="critical"
+          >
+            <MiniListaClientes
+              clientes={deudaArrastrada.clientes}
+              monto={(c) => montoRealCiclo(c) ?? 0}
+              motivo={(c) => (c.vencidoDesde ? `Vencido desde ${new Date(c.vencidoDesde).toLocaleDateString("es-PE")}` : "Vencido")}
+            />
+          </CollapsibleCard>
+        )}
+
+        {bajas && bajas.excluidosPorFaltaDePago.count > 0 && (
+          <CollapsibleCard
+            titulo="Bajas con deuda pendiente (excluidas de la proyección)"
+            subtitulo="Motivo de baja no registrado en el sistema — no se afirma 'falta de pago', es un indicio por deuda pendiente"
+            abierto={bajasAbierto}
+            onToggle={() => setBajasAbierto((v) => !v)}
+            contador={bajas.excluidosPorFaltaDePago.count}
+            tone="pending"
+          >
+            <DataTable
+              columns={[
+                {
+                  key: "cliente",
+                  label: "Cliente / RUC",
+                  render: (c: (typeof bajas.excluidosPorFaltaDePago.clientes)[number]) => (
+                    <ClienteCell numeroDocumentoCliente={c.numeroDocumentoCliente} nombreCliente={c.nombreCliente} sistemas={c.sistemas} />
+                  ),
+                },
+                { key: "plan", label: "Plan", render: (c) => c.planActual.nombre || "—" },
+                { key: "deuda", label: "Deuda actual", align: "right", render: (c) => formatCurrency(c.deudaTotal) },
+                {
+                  key: "fechaBaja",
+                  label: "Dado de baja",
+                  render: (c) => (c.fechaBaja ? new Date(c.fechaBaja).toLocaleDateString("es-PE") : "—"),
+                },
+                { key: "ejecutivo", label: "Ejecutivo", render: (c) => c.ejecutivo ?? "—" },
+              ]}
+              rows={bajas.excluidosPorFaltaDePago.clientes}
+              rowKey={(c) => c.numeroDocumentoCliente}
+              emptyMessage="Sin clientes en esta condición."
+            />
+          </CollapsibleCard>
+        )}
       </div>
 
-      <div className="card">
-        {vista === "proximas" && (
-          <DataTable
-            columns={columnasProximas(setClienteSeleccionado)}
-            rows={filasProximas}
-            rowKey={(c) => c.numeroDocumentoCliente}
-            loading={loading}
-            emptyMessage="No hay clientes con renovación sana en este alcance."
+      {/* ---------------------------------------------------------------- */}
+      {/* Lista de cobranza                                                 */}
+      {/* ---------------------------------------------------------------- */}
+      <section id="renovaciones-tabla">
+        <h2>Lista de cobranza</h2>
+
+        <div className="segmented-control renovaciones-tabs" role="tablist" aria-label="Estado de pago">
+          <button type="button" role="tab" aria-selected={tab === "no_pagaron"} className={tab === "no_pagaron" ? "activo" : ""} onClick={() => setTab("no_pagaron")}>
+            No pagaron ({formatNumber(totalNoPagaron)})
+          </button>
+          <button type="button" role="tab" aria-selected={tab === "ya_pagaron"} className={tab === "ya_pagaron" ? "activo" : ""} onClick={() => setTab("ya_pagaron")}>
+            Ya pagaron ({formatNumber(totalYaPagaron)})
+          </button>
+        </div>
+
+        {tab === "no_pagaron" && (
+          <FacetButtons
+            ariaLabel="Filtro por estado de vencimiento"
+            activo={segmentoFiltro}
+            onChange={setSegmentoFiltro}
+            facets={facetSegmento}
+            opciones={[
+              { value: "", label: "Todos" },
+              { value: "vencido_este_mes", label: SEGMENTO_LABEL.vencido_este_mes },
+              { value: "vence_hoy", label: SEGMENTO_LABEL.vence_hoy },
+              { value: "proximos_7_dias", label: SEGMENTO_LABEL.proximos_7_dias },
+              { value: "resto_mes", label: SEGMENTO_LABEL.resto_mes },
+            ]}
           />
         )}
-        {vista === "vencidas" && (
-          <DataTable
-            columns={columnasVencidas(setClienteSeleccionado)}
-            rows={filasVencidas}
-            rowKey={(c) => c.numeroDocumentoCliente}
-            loading={loading}
-            sortBy="vencido"
-            sortDir={ordenVencidas}
-            onSortChange={() => setOrdenVencidas((o) => (o === "desc" ? "asc" : "desc"))}
-            emptyMessage="No hay clientes vencidos — toda la cartera viene al día."
+
+        <FilterBar>
+          <div className="field">
+            <label htmlFor="renovaciones-busqueda">Cliente o RUC</label>
+            <SearchInput id="renovaciones-busqueda" value={busqueda} onChange={setBusqueda} placeholder="Buscar..." />
+          </div>
+        </FilterBar>
+
+        <div className="field renovaciones-facet-field">
+          <span className="renovaciones-facet-titulo">Periodicidad</span>
+          <FacetButtons
+            ariaLabel="Filtro por periodicidad"
+            activo={periodicidadFiltro}
+            onChange={setPeriodicidadFiltro}
+            facets={facetPeriodicidad}
+            opciones={[
+              { value: "", label: "Todas" },
+              { value: "MENSUAL", label: "Mensual" },
+              { value: "TRIMESTRAL", label: "Trimestral" },
+              { value: "SEMESTRAL", label: "Semestral" },
+              { value: "ANUAL", label: "Anual" },
+            ]}
           />
-        )}
-        {vista === "cobranzaMensual" && (
-          <DataTable
-            columns={columnasCobranza}
-            rows={mensualesFiltrados}
-            rowKey={(c) => c.numeroDocumentoCliente}
-            loading={loading}
-            emptyMessage={
-              cicloFiltro === ""
-                ? "No hay clientes con plan mensual."
-                : `Ningún cliente mensual en el ciclo ${String(cicloFiltro).padStart(2, "0")}.`
-            }
+        </div>
+
+        <div className="field renovaciones-facet-field">
+          <span className="renovaciones-facet-titulo">Ciclo mensual</span>
+          <FacetButtons
+            ariaLabel="Filtro por ciclo mensual"
+            activo={cicloFiltro === "" ? "" : String(cicloFiltro)}
+            onChange={(v) => setCicloFiltro(v === "" ? "" : Number(v))}
+            facets={facetCiclo}
+            opciones={[
+              { value: "", label: "Todos" },
+              ...CICLOS_CONOCIDOS.map((c) => ({ value: String(c), label: String(c).padStart(2, "0") })),
+            ]}
           />
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <ExportButtons
+            disabled={filasTab.length === 0}
+            onExcel={() => exportarExcel("renovaciones", columnasExport, filasTab)}
+            onPdf={() => exportarPdf("renovaciones", "Renovaciones — Lista de cobranza", columnasExport, filasTab)}
+          />
+        </div>
+
+        <div className="card">
+          <DataTable
+            columns={columnas}
+            rows={filasPagina}
+            rowKey={(f) => f.cliente.numeroDocumentoCliente}
+            loading={loading}
+            emptyMessage="No hay clientes para este filtro."
+            stickyFirstColumn
+          />
+        </div>
+
+        {filasTab.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <Pagination page={page} pageSize={TABLA_PAGE_SIZE} total={filasTab.length} onPageChange={setPage} itemLabel="cliente(s)" />
+          </div>
         )}
-      </div>
+
+        {!loading && filasTab.length === 0 && todos.length === 0 && <EmptyState title="Sin datos de clientes todavía" />}
+      </section>
 
       {clienteSeleccionado && (
         <AccionesClienteDrawer
           key={clienteSeleccionado}
           numeroDocumentoCliente={clienteSeleccionado}
+          origen={{ modulo: "RENOVACIONES", etiqueta: "Renovaciones", entidadTipo: "CLIENTE", entidadId: clienteSeleccionado }}
           onClose={() => setClienteSeleccionado(null)}
         />
       )}
+
+      {seguimientoFila && (
+        <CrearSeguimientoDialog
+          numeroDocumentoCliente={seguimientoFila.cliente.numeroDocumentoCliente}
+          onClose={() => setSeguimientoFila(null)}
+          onCreado={() => setSeguimientoFila(null)}
+        />
+      )}
+
+      <Drawer
+        open={tareaFilaActual !== null}
+        onClose={() => setTareaFilaActual(null)}
+        title={tareaFilaActual ? `Tarea — ${tareaFilaActual.cliente.nombreCliente}` : "Nueva tarea"}
+      >
+        <TareaForm
+          key={tareaFilaActual?.cliente.numeroDocumentoCliente ?? "closed"}
+          initial={tareaInicial}
+          onSubmit={handleSubmitTarea}
+          onCancel={() => setTareaFilaActual(null)}
+          submitting={savingTarea}
+        />
+      </Drawer>
     </div>
   );
 }
