@@ -72,6 +72,19 @@ export function UsuariosAutorizadosPanel() {
     }
   }
 
+  async function handleToggleReparto(usuario: UsuarioAutorizado) {
+    setFilaError(null);
+    setActualizandoId(usuario.id);
+    try {
+      await actualizarUsuarioAutorizado(usuario.id, { recibeReparto: !usuario.recibeReparto });
+      refetch();
+    } catch (err) {
+      setFilaError({ id: usuario.id, message: extractErrorMessage(err, "No se pudo cambiar el reparto") });
+    } finally {
+      setActualizandoId(null);
+    }
+  }
+
   const columns: DataTableColumn<UsuarioAutorizado>[] = [
     { key: "nombreVisible", label: "Nombre", render: (u) => u.nombreVisible },
     { key: "usuarioExterno", label: "Usuario externo", render: (u) => u.usuarioExterno },
@@ -106,6 +119,22 @@ export function UsuariosAutorizadosPanel() {
         </button>
       ),
     },
+    {
+      key: "recibeReparto",
+      label: "Recibe reparto",
+      render: (u) => (
+        <label>
+          <input
+            type="checkbox"
+            checked={u.recibeReparto}
+            disabled={actualizandoId === u.id || !u.activo}
+            onChange={() => handleToggleReparto(u)}
+            aria-label={`${u.nombreVisible} recibe reparto de tareas`}
+          />{" "}
+          {u.recibeReparto ? "Sí" : "No"}
+        </label>
+      ),
+    },
     { key: "ultimoAccesoEn", label: "Último acceso", render: (u) => formatFecha(u.ultimoAccesoEn) },
     {
       key: "creadoEn",
@@ -120,6 +149,11 @@ export function UsuariosAutorizadosPanel() {
       <p className="muted">
         Solo los usuarios listados aquí pueden entrar a Plataforma Postventa con sus propias
         credenciales de APIWorking. Nunca se guarda ninguna contraseña en esta tabla.
+      </p>
+      <p className="muted">
+        "Recibe reparto" decide quién recibe los contactos diarios de Tareas, repartidos en partes
+        iguales entre quienes estén marcados. Aplica a cualquier rol: un ADMIN marcado también recibe
+        tareas, y además puede ver las de todos.
       </p>
 
       {error && <p className="error-text">{error}</p>}

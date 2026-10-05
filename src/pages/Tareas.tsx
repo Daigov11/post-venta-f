@@ -131,6 +131,7 @@ function buildColumns(
     },
     { key: "descripcion", label: "Descripción", render: (t) => <span className="muted">{truncar(t.descripcion, 60)}</span> },
     { key: "vencimiento", label: "Fecha", render: (t) => t.fechaVencimiento ?? "Sin fecha" },
+    { key: "responsable", label: "Responsable", render: (t) => <Badge tone="info">{t.responsable}</Badge> },
     { key: "tipo", label: "Tipo", render: (t) => <TipoTareaPill tipo={t.tipo} /> },
     { key: "origen", label: "Origen", render: (t) => <OrigenTareaBadge origen={t.origen} /> },
     { key: "prioridad", label: "Prioridad", render: (t) => <PrioridadTareaPill prioridad={t.prioridad} /> },

@@ -40,12 +40,28 @@ export async function getTareasRenovacion(): Promise<TareaRenovacion[]> {
 // Reparto mensual de contactos — se genera/sincroniza al pedir esta lista
 // (mismo patron que renovacion), pero NUNCA desde GET /tareas general (ver
 // listTareas en el backend, ajustado por rendimiento).
-export async function getCarteraMensual(): Promise<{
+//
+// alcance="mias" limita a las tareas del propio usuario (un ADMIN que tambien
+// recibe reparto); sin el, un ADMIN ve las de todos y el resto solo las suyas
+// (lo decide el backend, no este parametro).
+export async function getCarteraMensual(alcance: "todas" | "mias" = "todas"): Promise<{
   resumen: ResumenCarteraMensual;
   data: TareaCarteraMensual[];
 }> {
   const { data } = await apiClient.get<{ resumen: ResumenCarteraMensual; data: TareaCarteraMensual[] }>(
-    "/tareas/reparto-mensual"
+    "/tareas/reparto-mensual",
+    { params: alcance === "mias" ? { alcance } : undefined }
+  );
+  return data;
+}
+
+export async function reconstruirCarteraMensual(): Promise<{
+  nuevas: number;
+  replanificadas: number;
+  canceladas: number;
+}> {
+  const { data } = await apiClient.post<{ nuevas: number; replanificadas: number; canceladas: number }>(
+    "/tareas/reparto-mensual/reconstruir"
   );
   return data;
 }

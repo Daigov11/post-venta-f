@@ -4,12 +4,14 @@ import { ActionMenu, type ActionMenuItem } from "../../components/ui/ActionMenu"
 import { Badge } from "../../components/ui/Badge";
 import { ClienteCell } from "../../components/ui/ClienteCell";
 import { CollapsibleCard } from "../../components/ui/CollapsibleCard";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
 import { FilterBar } from "../../components/ui/FilterBar";
 import { Pagination } from "../../components/ui/Pagination";
 import { SearchInput } from "../../components/ui/SearchInput";
+import { useAuth } from "../../context/AuthContext";
 import { useCarteraMensual } from "../../hooks/useCarteraMensual";
-import { redistribuirCarteraMensual, updateTarea } from "../../services/tareas";
+import { reconstruirCarteraMensual, redistribuirCarteraMensual, updateTarea } from "../../services/tareas";
 import type { TareaCarteraMensual } from "../../types/postventaCliente";
 import { hoyIso } from "./helpers";
 
@@ -28,9 +30,17 @@ function esPendienteDeRedistribuir(f: TareaCarteraMensual, hoy: string): boolean
 }
 
 export function CarteraMensualPanel() {
+  const { rol } = useAuth();
+  const esAdmin = rol === "ADMIN";
   const [abierto, setAbierto] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
-  const { data, loading, error, refetch } = useCarteraMensual(refreshToken);
+  // Solo el ADMIN elige: ve todas o solo las suyas. El resto siempre recibe
+  // solo las suyas, filtradas en el backend.
+  const [alcance, setAlcance] = useState<"todas" | "mias">("todas");
+  const { data, loading, error, refetch } = useCarteraMensual(alcance, refreshToken);
+  const [confirmandoReconstruir, setConfirmandoReconstruir] = useState(false);
+  const [reconstruyendo, setReconstruyendo] = useState(false);
+  const [resultadoReconstruir, setResultadoReconstruir] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState("");
   const [responsableFiltro, setResponsableFiltro] = useState("");
   const [diaFiltro, setDiaFiltro] = useState("");
@@ -94,6 +104,22 @@ export function CarteraMensualPanel() {
     }
   }
 
+  async function handleReconstruir() {
+    setConfirmandoReconstruir(false);
+    setReconstruyendo(true);
+    try {
+      const r = await reconstruirCarteraMensual();
+      setResultadoReconstruir(
+        `Reparto reconstruido: ${r.nuevas} nueva(s), ${r.replanificadas} reubicada(s), ${r.canceladas} cancelada(s).`
+      );
+      setRefreshToken((v) => v + 1);
+    } catch {
+      setResultadoReconstruir("No se pudo reconstruir el reparto. Intenta de nuevo.");
+    } finally {
+      setReconstruyendo(false);
+    }
+  }
+
   const columnas: DataTableColumn<TareaCarteraMensual>[] = [
     {
       key: "acciones",
@@ -125,8 +151,9 @@ export function CarteraMensualPanel() {
         <ClienteCell numeroDocumentoCliente={f.cliente.numeroDocumentoCliente} nombreCliente={f.cliente.nombreCliente} sistemas={f.cliente.sistemas} />
       ),
     },
+    { key: "periodicidad", label: "Plan", render: (f) => f.cliente.periodicidad },
     { key: "dia", label: "Día asignado", render: (f) => f.tarea.fechaVencimiento ?? "—" },
-    { key: "responsable", label: "Responsable", render: (f) => f.tarea.responsable },
+    { key: "responsable", label: "Responsable", render: (f) => <Badge tone="info">{f.tarea.responsable}</Badge> },
     {
       key: "estado",
       label: "Estado",
@@ -152,9 +179,25 @@ export function CarteraMensualPanel() {
       tone="neutral"
     >
       <p className="muted">
-        Reparto parejo de todos los clientes activos entre los días hábiles del mes, para que cada uno
-        reciba un contacto de seguimiento al menos una vez — sin ningún criterio de negocio.
+        Clientes en estado INICIAR COBRANZA, contactados según su plan: mensuales una vez al mes; semestrales
+        y anuales cada 2 meses hasta su renovación (la renovación misma y los trimestrales salen en "Por
+        renovar"). La carga se reparte en partes iguales entre los días hábiles (lunes a sábado) y entre las
+        personas marcadas en Configuración.
       </p>
+      {esAdmin && (
+        <div className="toolbar-row">
+          <button type="button" className={alcance === "todas" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setAlcance("todas")}>
+            Todas las tareas
+          </button>
+          <button type="button" className={alcance === "mias" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setAlcance("mias")}>
+            Solo las mías
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={reconstruyendo} onClick={() => setConfirmandoReconstruir(true)}>
+            {reconstruyendo ? "Reconstruyendo..." : "Reconstruir reparto"}
+          </button>
+        </div>
+      )}
+      {resultadoReconstruir && <p role="status">{resultadoReconstruir}</p>}
       {resumen && (
         <div className="cartera-mensual-resumen">
           <div className="cartera-mensual-metrica">
@@ -174,6 +217,17 @@ export function CarteraMensualPanel() {
               {redistribuyendo ? "Redistribuyendo..." : `Redistribuir ${resumen.pendientesDeRedistribuir} pendiente(s)`}
             </button>
           )}
+        </div>
+      )}
+
+      {resumen && resumen.porResponsable.length > 0 && (
+        <div className="cartera-mensual-resumen">
+          {resumen.porResponsable.map((r) => (
+            <div key={r.responsable} className="cartera-mensual-metrica">
+              <strong>{r.responsable}</strong>: {r.contactados}/{r.total}
+              <span className="muted"> contactados</span>
+            </div>
+          ))}
         </div>
       )}
 
@@ -253,6 +307,16 @@ export function CarteraMensualPanel() {
           <Pagination page={page} pageSize={PAGE_SIZE} total={filasFiltradas.length} onPageChange={setPage} itemLabel="cliente(s)" />
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmandoReconstruir}
+        title="Reconstruir el reparto del mes"
+        message="Aplica las reglas actuales a las tareas de contacto del mes que siguen PENDIENTES: las reubica según el plan del cliente y la carga del equipo, y cancela las de clientes que ya no están en INICIAR COBRANZA o a quienes no les toca contacto este mes. No toca las completadas ni las en seguimiento, ni borra nada."
+        confirmLabel="Reconstruir"
+        danger
+        onConfirm={handleReconstruir}
+        onCancel={() => setConfirmandoReconstruir(false)}
+      />
 
       {clienteSeleccionado && (
         <AccionesClienteDrawer

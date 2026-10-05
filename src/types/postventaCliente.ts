@@ -571,6 +571,7 @@ export interface TareaCarteraMensual {
     numeroDocumentoCliente: string;
     nombreCliente: string;
     sistemas: ClienteSistemas;
+    periodicidad: Periodicidad;
   };
 }
 
@@ -581,6 +582,7 @@ export interface ResumenCarteraMensual {
   noContactados: number;
   pendientesDeRedistribuir: number;
   porDia: { fecha: string; total: number; contactados: number }[];
+  porResponsable: { responsable: string; total: number; contactados: number }[];
 }
 
 export interface Seguimiento {

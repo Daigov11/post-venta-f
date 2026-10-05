@@ -8,6 +8,7 @@ export interface UsuarioAutorizado {
   nombreVisible: string;
   rol: RolUsuario;
   activo: boolean;
+  recibeReparto: boolean;
   ultimoAccesoEn: string | null;
   creadoEn: string;
   actualizadoEn: string;
@@ -27,6 +28,7 @@ export interface ActualizarUsuarioAutorizadoInput {
   nombreVisible?: string;
   rol?: RolUsuario;
   activo?: boolean;
+  recibeReparto?: boolean;
   idUsuarioApiworking?: string;
 }
 

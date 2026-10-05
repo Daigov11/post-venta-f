@@ -91,6 +91,14 @@ export function TareaDetalleDrawer({
       </div>
 
       <section className="tarea-detalle-seccion">
+        <h4>Responsable</h4>
+        <p>
+          <Badge tone="info">{tarea.responsable}</Badge>
+          {tarea.fechaVencimiento && <span className="muted"> · vence {tarea.fechaVencimiento}</span>}
+        </p>
+      </section>
+
+      <section className="tarea-detalle-seccion">
         <h4>Descripción</h4>
         <p>{tarea.descripcion || <span className="muted">Sin descripción.</span>}</p>
       </section>
