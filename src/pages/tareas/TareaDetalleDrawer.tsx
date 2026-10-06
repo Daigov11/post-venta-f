@@ -11,6 +11,7 @@ import {
 } from "../../components/ui/StatusPill";
 import { useEventosOperativos } from "../../hooks/useEventosOperativos";
 import type { PostVentaCliente, TareaListItem } from "../../types/postventaCliente";
+import { formatFechaCorta } from "../../utils/format";
 import { tipoAccionLabel } from "../../utils/eventoOperativoLabels";
 import { ReasignarAction } from "./ReasignarAction";
 import { SeguimientosSection } from "./SeguimientosSection";
@@ -94,7 +95,7 @@ export function TareaDetalleDrawer({
         <h4>Responsable</h4>
         <p>
           <Badge tone="info">{tarea.responsable}</Badge>
-          {tarea.fechaVencimiento && <span className="muted"> · vence {tarea.fechaVencimiento}</span>}
+          {tarea.fechaVencimiento && <span className="muted"> · vence {formatFechaCorta(tarea.fechaVencimiento)}</span>}
         </p>
       </section>
 
@@ -161,7 +162,7 @@ export function TareaDetalleDrawer({
             className="btn btn-secondary"
             disabled={procesando}
             onClick={onPostergar}
-            title={`Nueva fecha: ${postergarFecha(tarea.fechaVencimiento, 3)}`}
+            title={`Nueva fecha: ${formatFechaCorta(postergarFecha(tarea.fechaVencimiento, 3))}`}
           >
             Postergar 3 días
           </button>

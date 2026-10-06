@@ -8,6 +8,7 @@ import { useSeguimientos } from "../../hooks/useSeguimientos";
 import { uploadAdjuntos } from "../../services/adjuntos";
 import { createSeguimiento, updateTarea } from "../../services/tareas";
 import type { EstadoTarea, Tarea } from "../../types/postventaCliente";
+import { formatFechaCorta } from "../../utils/format";
 import { ESTADO_TAREA_LABEL } from "../../utils/tareaLabels";
 import { SectionHeader, SourceTag } from "./fichaShared";
 
@@ -47,7 +48,7 @@ function TareaItem({ tarea, onChanged }: { tarea: Tarea; onChanged: () => void }
           <div className="tarea-item-title">{tarea.titulo}</div>
           <div className="tarea-item-meta">
             {tarea.responsable} · <PrioridadTareaPill prioridad={tarea.prioridad} />
-            {tarea.fechaVencimiento ? ` · Vence ${tarea.fechaVencimiento}` : ""}
+            {tarea.fechaVencimiento ? ` · Vence ${formatFechaCorta(tarea.fechaVencimiento)}` : ""}
           </div>
         </div>
         <select

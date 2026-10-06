@@ -13,6 +13,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useCarteraMensual } from "../../hooks/useCarteraMensual";
 import { reconstruirCarteraMensual, redistribuirCarteraMensual, updateTarea } from "../../services/tareas";
 import type { TareaCarteraMensual } from "../../types/postventaCliente";
+import { formatFechaCorta } from "../../utils/format";
 import { hoyIso } from "./helpers";
 
 const PAGE_SIZE = 10;
@@ -152,7 +153,7 @@ export function CarteraMensualPanel() {
       ),
     },
     { key: "periodicidad", label: "Plan", render: (f) => f.cliente.periodicidad },
-    { key: "dia", label: "Día asignado", render: (f) => f.tarea.fechaVencimiento ?? "—" },
+    { key: "dia", label: "Día asignado", render: (f) => formatFechaCorta(f.tarea.fechaVencimiento) },
     { key: "responsable", label: "Responsable", render: (f) => <Badge tone="info">{f.tarea.responsable}</Badge> },
     {
       key: "estado",
@@ -179,10 +180,10 @@ export function CarteraMensualPanel() {
       tone="neutral"
     >
       <p className="muted">
-        Clientes en estado INICIAR COBRANZA, contactados según su plan: mensuales una vez al mes; semestrales
-        y anuales cada 2 meses hasta su renovación (la renovación misma y los trimestrales salen en "Por
-        renovar"). La carga se reparte en partes iguales entre los días hábiles (lunes a sábado) y entre las
-        personas marcadas en Configuración.
+        Clientes en estado INICIAR COBRANZA, contactados según su plan: mensuales una vez al mes;
+        trimestrales 2 semanas antes de renovar; semestrales y anuales cada 2 meses hasta su renovación,
+        el día que les toca pagar. La carga se reparte en partes iguales entre los días hábiles (lunes a
+        sábado) y entre las personas marcadas en Configuración.
       </p>
       {esAdmin && (
         <div className="toolbar-row">
@@ -220,7 +221,7 @@ export function CarteraMensualPanel() {
         </div>
       )}
 
-      {resumen && resumen.porResponsable.length > 0 && (
+      {resumen?.porResponsable && resumen.porResponsable.length > 0 && (
         <div className="cartera-mensual-resumen">
           {resumen.porResponsable.map((r) => (
             <div key={r.responsable} className="cartera-mensual-metrica">
@@ -237,7 +238,7 @@ export function CarteraMensualPanel() {
           <div className="cartera-mensual-dias">
             {resumen.porDia.map((d) => (
               <div key={d.fecha} className="cartera-mensual-dia">
-                <span className="mono">{d.fecha}</span>
+                <span className="mono">{formatFechaCorta(d.fecha)}</span>
                 <span>
                   {d.contactados}/{d.total}
                 </span>
@@ -278,7 +279,7 @@ export function CarteraMensualPanel() {
             <option value="">Todos</option>
             {dias.map((d) => (
               <option key={d} value={d}>
-                {d}
+                {formatFechaCorta(d)}
               </option>
             ))}
           </select>

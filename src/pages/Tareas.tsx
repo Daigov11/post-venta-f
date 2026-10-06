@@ -3,7 +3,6 @@ import { AccionesClienteDrawer } from "../components/panels/AccionesClienteDrawe
 import { ActionMenu, type ActionMenuItem } from "../components/ui/ActionMenu";
 import { Badge } from "../components/ui/Badge";
 import { ClienteCell } from "../components/ui/ClienteCell";
-import { CollapsibleCard } from "../components/ui/CollapsibleCard";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { Pagination } from "../components/ui/Pagination";
@@ -11,18 +10,16 @@ import { SearchInput } from "../components/ui/SearchInput";
 import { EstadoTareaPill, OrigenTareaBadge, PrioridadTareaPill, TipoTareaPill } from "../components/ui/StatusPill";
 import { useClientes } from "../hooks/useClientes";
 import { useTareas } from "../hooks/useTareas";
-import { useTareasRenovacion } from "../hooks/useTareasRenovacion";
 import { updateTarea } from "../services/tareas";
 import type {
   OrigenTarea,
-  Periodicidad,
   PostVentaCliente,
   PrioridadTarea,
   Tarea,
   TareaListItem,
-  TareaRenovacion,
   TipoTarea,
 } from "../types/postventaCliente";
+import { formatFechaCorta } from "../utils/format";
 import { ORIGEN_TAREA_LABEL, TIPO_TAREA_LABEL } from "../utils/tareaLabels";
 import { CarteraMensualPanel } from "./tareas/CarteraMensualPanel";
 import { TareaDetalleDrawer } from "./tareas/TareaDetalleDrawer";
@@ -130,206 +127,13 @@ function buildColumns(
       },
     },
     { key: "descripcion", label: "Descripción", render: (t) => <span className="muted">{truncar(t.descripcion, 60)}</span> },
-    { key: "vencimiento", label: "Fecha", render: (t) => t.fechaVencimiento ?? "Sin fecha" },
+    { key: "vencimiento", label: "Fecha", render: (t) => formatFechaCorta(t.fechaVencimiento, "Sin fecha") },
     { key: "responsable", label: "Responsable", render: (t) => <Badge tone="info">{t.responsable}</Badge> },
     { key: "tipo", label: "Tipo", render: (t) => <TipoTareaPill tipo={t.tipo} /> },
     { key: "origen", label: "Origen", render: (t) => <OrigenTareaBadge origen={t.origen} /> },
     { key: "prioridad", label: "Prioridad", render: (t) => <PrioridadTareaPill prioridad={t.prioridad} /> },
     { key: "estado", label: "Estado", render: (t) => <EstadoTareaPill estado={t.estado} /> },
   ];
-}
-
-// ---------------------------------------------------------------------------
-// Panel de tareas de renovacion — generadas automaticamente por el backend
-// (sincronizarTareasRenovacion) para todo cliente en ventana de renovacion,
-// una tarea abierta a la vez. Sin cambios de fondo — sigue siendo su propio
-// panel especializado, separado de la lista general de abajo.
-// ---------------------------------------------------------------------------
-type FiltroContacto = "todos" | "contactados" | "noContactados";
-
-function TareasRenovacionPanel() {
-  const { data, loading, error, refetch } = useTareasRenovacion();
-  const [abierto, setAbierto] = useState(false);
-  const [periodicidad, setPeriodicidad] = useState<Periodicidad | "">("");
-  const [filtroContacto, setFiltroContacto] = useState<FiltroContacto>("todos");
-  const [ordenIngresos, setOrdenIngresos] = useState<"asc" | "desc" | null>(null);
-  const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
-  const [marcandoId, setMarcandoId] = useState<number | null>(null);
-
-  const PERIODICIDADES: { value: Periodicidad; label: string }[] = [
-    { value: "MENSUAL", label: "Mensual" },
-    { value: "TRIMESTRAL", label: "Trimestral" },
-    { value: "SEMESTRAL", label: "Semestral" },
-    { value: "ANUAL", label: "Anual" },
-  ];
-
-  const filas = useMemo(() => {
-    let filas = data ?? [];
-    if (periodicidad) filas = filas.filter((f) => f.cliente.periodicidad === periodicidad);
-    if (filtroContacto === "contactados") {
-      filas = filas.filter((f) => f.tarea.estado === "COMPLETADA");
-    } else if (filtroContacto === "noContactados") {
-      filas = filas.filter((f) => f.tarea.estado !== "COMPLETADA");
-    }
-    if (ordenIngresos) {
-      const dir = ordenIngresos === "asc" ? 1 : -1;
-      filas = [...filas].sort(
-        (a, b) => dir * ((a.cliente.ingresoMensualReal ?? -1) - (b.cliente.ingresoMensualReal ?? -1))
-      );
-    }
-    return filas;
-  }, [data, periodicidad, filtroContacto, ordenIngresos]);
-
-  async function handleContactar(tarea: Tarea) {
-    setMarcandoId(tarea.id);
-    try {
-      await updateTarea(tarea.id, { estado: "COMPLETADA" });
-      refetch();
-    } finally {
-      setMarcandoId(null);
-    }
-  }
-
-  async function handleRevertirContacto(tarea: Tarea) {
-    setMarcandoId(tarea.id);
-    try {
-      await updateTarea(tarea.id, { estado: "PENDIENTE" });
-      refetch();
-    } finally {
-      setMarcandoId(null);
-    }
-  }
-
-  const columnasRenovacion: DataTableColumn<TareaRenovacion>[] = [
-    {
-      key: "acciones",
-      label: "",
-      align: "center",
-      render: (f) => {
-        const items: ActionMenuItem[] = [
-          {
-            key: "agendar",
-            label: "Agendar / Interés",
-            onSelect: () => setClienteSeleccionado(f.cliente.numeroDocumentoCliente),
-          },
-          f.tarea.estado === "COMPLETADA"
-            ? {
-                key: "contactar",
-                label: "Marcar no contactado",
-                disabled: marcandoId === f.tarea.id,
-                onSelect: () => handleRevertirContacto(f.tarea),
-              }
-            : f.tarea.estado === "CANCELADA"
-              ? { key: "contactar", label: "Contactar", disabled: true }
-              : {
-                  key: "contactar",
-                  label: "Contactar",
-                  disabled: marcandoId === f.tarea.id,
-                  onSelect: () => handleContactar(f.tarea),
-                },
-        ];
-        return <ActionMenu label={`Acciones para ${f.cliente.nombreCliente}`} items={items} />;
-      },
-    },
-    {
-      key: "cliente",
-      label: "Cliente",
-      render: (f) => (
-        <ClienteCell numeroDocumentoCliente={f.cliente.numeroDocumentoCliente} nombreCliente={f.cliente.nombreCliente} sistemas={f.cliente.sistemas} />
-      ),
-    },
-    { key: "periodicidad", label: "Periodicidad", render: (f) => f.cliente.periodicidad },
-    {
-      key: "renovacion",
-      label: "Renovación",
-      align: "right",
-      render: (f) => {
-        const dias = f.cliente.diasParaRenovacion;
-        if (dias === null) return <span className="muted">—</span>;
-        if (dias < 0) return <Badge tone="critical">Vencida</Badge>;
-        return <Badge tone={dias <= 7 ? "warning" : "neutral"}>{dias} día(s)</Badge>;
-      },
-    },
-    {
-      key: "ingresos",
-      label: "Ingresos mensuales",
-      align: "right",
-      sortable: true,
-      render: (f) => (f.cliente.ingresoMensualReal == null ? "—" : new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(f.cliente.ingresoMensualReal)),
-    },
-    {
-      key: "estado",
-      label: "Estado",
-      render: (f) =>
-        f.tarea.estado === "COMPLETADA" ? (
-          <Badge tone="success">Contactado</Badge>
-        ) : f.tarea.estado === "CANCELADA" ? (
-          <Badge tone="critical">Cancelada</Badge>
-        ) : (
-          <Badge tone="warning">Pendiente</Badge>
-        ),
-    },
-  ];
-
-  return (
-    <CollapsibleCard titulo="Por renovar — contactar" abierto={abierto} onToggle={() => setAbierto((v) => !v)} contador={filas.length} tone="warning">
-      <p className="muted">
-        Clientes que entraron a la ventana de renovación (mismo criterio que la alerta "Renovación
-        próxima") — se generan solos, sin que nadie tenga que crearlos a mano.
-      </p>
-      <div className="toolbar-row">
-        <button type="button" className={periodicidad === "" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setPeriodicidad("")}>
-          Todas
-        </button>
-        {PERIODICIDADES.map((p) => (
-          <button key={p.value} type="button" className={periodicidad === p.value ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setPeriodicidad(p.value)}>
-            {p.label}
-          </button>
-        ))}
-      </div>
-      <div className="toolbar-row" style={{ marginTop: 8 }}>
-        <button type="button" className={filtroContacto === "todos" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setFiltroContacto("todos")}>
-          Todos
-        </button>
-        <button type="button" className={filtroContacto === "noContactados" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setFiltroContacto("noContactados")}>
-          No contactados
-        </button>
-        <button type="button" className={filtroContacto === "contactados" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setFiltroContacto("contactados")}>
-          Contactados
-        </button>
-      </div>
-      {error && (
-        <div className="error-banner" role="alert">
-          <span>{error}</span>
-          <button type="button" className="btn btn-ghost" onClick={refetch}>
-            Reintentar
-          </button>
-        </div>
-      )}
-      <DataTable
-        columns={columnasRenovacion}
-        rows={filas}
-        rowKey={(f) => f.tarea.id}
-        loading={loading}
-        sortBy={ordenIngresos ? "ingresos" : undefined}
-        sortDir={ordenIngresos ?? undefined}
-        onSortChange={(key) => {
-          if (key !== "ingresos") return;
-          setOrdenIngresos((actual) => (actual === null ? "desc" : actual === "desc" ? "asc" : null));
-        }}
-        emptyMessage="Sin clientes por renovar en este momento."
-        stickyFirstColumn
-      />
-      {clienteSeleccionado && (
-        <AccionesClienteDrawer
-          key={clienteSeleccionado}
-          numeroDocumentoCliente={clienteSeleccionado}
-          origen={{ modulo: "TAREAS", etiqueta: "Renovaciones por contactar", entidadTipo: "CLIENTE", entidadId: clienteSeleccionado }}
-          onClose={() => setClienteSeleccionado(null)}
-        />
-      )}
-    </CollapsibleCard>
-  );
 }
 
 // Sin filtro de "solo con incidencia" en el backend — se trae toda la
@@ -416,7 +220,7 @@ export function TareasPage() {
   // Reparto mensual vive en su propio panel ("Cartera mensual", ver abajo) —
   // nunca se mezcla con Pendientes/En seguimiento/Completadas: son 1300+
   // contactos rutinarios que tapaban el trabajo real (ver feedback).
-  const todas = useMemo(() => (data ?? []).filter((t) => t.origen !== "REPARTO_MENSUAL"), [data]);
+  const todas = useMemo(() => (data ?? []).filter((t) => t.origen !== "REPARTO_MENSUAL" && t.origen !== "RENOVACION"), [data]);
   const responsables = useMemo(() => [...new Set(todas.map((t) => t.responsable))].sort((a, b) => a.localeCompare(b)), [todas]);
 
   const filasFiltradas = useMemo(() => {
@@ -480,7 +284,6 @@ export function TareasPage() {
         </div>
       </div>
 
-      <TareasRenovacionPanel />
       <CarteraMensualPanel />
 
       {error && (
@@ -554,7 +357,7 @@ export function TareasPage() {
             {(Object.entries(ORIGEN_TAREA_LABEL) as [OrigenTarea, string][])
               // Reparto mensual vive en su propio panel ("Cartera mensual"),
               // nunca en esta lista — ofrecerlo aca no tendria resultados.
-              .filter(([value]) => value !== "REPARTO_MENSUAL")
+              .filter(([value]) => value !== "REPARTO_MENSUAL" && value !== "RENOVACION")
               .map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}

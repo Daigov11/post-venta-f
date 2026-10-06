@@ -8,7 +8,6 @@ import type {
   Tarea,
   TareaCarteraMensual,
   TareaListItem,
-  TareaRenovacion,
   TipoTarea,
 } from "../types/postventaCliente";
 
@@ -29,16 +28,8 @@ export async function getTareas(params: TareasQueryParams = {}): Promise<TareaLi
   return data.data;
 }
 
-// Auto-generadas por el sync compartido (clientes en ventana de renovacion,
-// una tarea abierta a la vez por cliente) — se sincronizan al pedir esta
-// lista, no hace falta refrescar manualmente.
-export async function getTareasRenovacion(): Promise<TareaRenovacion[]> {
-  const { data } = await apiClient.get<{ data: TareaRenovacion[] }>("/tareas/renovacion");
-  return data.data;
-}
-
-// Reparto mensual de contactos — se genera/sincroniza al pedir esta lista
-// (mismo patron que renovacion), pero NUNCA desde GET /tareas general (ver
+// Reparto mensual de contactos — se genera/sincroniza al pedir esta lista,
+// pero NUNCA desde GET /tareas general (ver
 // listTareas en el backend, ajustado por rendimiento).
 //
 // alcance="mias" limita a las tareas del propio usuario (un ADMIN que tambien
