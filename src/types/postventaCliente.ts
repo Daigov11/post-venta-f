@@ -572,6 +572,7 @@ export interface TareaCarteraMensual {
     nombreCliente: string;
     sistemas: ClienteSistemas;
     periodicidad: Periodicidad;
+    telefonoEfectivo: string | null;
   };
 }
 

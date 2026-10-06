@@ -3,16 +3,17 @@ import { AccionesClienteDrawer } from "../components/panels/AccionesClienteDrawe
 import { ActionMenu, type ActionMenuItem } from "../components/ui/ActionMenu";
 import { Badge } from "../components/ui/Badge";
 import { ClienteCell } from "../components/ui/ClienteCell";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "../components/ui/DataTable";
 import { FilterBar } from "../components/ui/FilterBar";
 import { KpiCard } from "../components/ui/KpiCard";
 import { SearchInput } from "../components/ui/SearchInput";
 import { useAuth } from "../context/AuthContext";
 import { useCarteraMensual } from "../hooks/useCarteraMensual";
-import { updateTarea } from "../services/tareas";
+import { reconstruirCarteraMensual, updateTarea } from "../services/tareas";
 import type { TareaCarteraMensual } from "../types/postventaCliente";
+import { buildContactoMenuItems } from "../utils/contactoMenuItems";
 import { formatFechaCorta } from "../utils/format";
-import { CarteraMensualPanel } from "./tareas/CarteraMensualPanel";
 import { esAbierta, hoyIso } from "./tareas/helpers";
 import "./Tareas.css";
 
@@ -34,6 +35,10 @@ export function TareasPage() {
   const [busqueda, setBusqueda] = useState("");
   const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
   const [marcandoId, setMarcandoId] = useState<number | null>(null);
+  const [responsableFiltro, setResponsableFiltro] = useState("");
+  const [confirmandoReconstruir, setConfirmandoReconstruir] = useState(false);
+  const [reconstruyendo, setReconstruyendo] = useState(false);
+  const [resultadoReconstruir, setResultadoReconstruir] = useState<string | null>(null);
 
   const hoy = hoyIso();
 
@@ -41,9 +46,10 @@ export function TareasPage() {
     const q = busqueda.trim().toLowerCase();
     const base = (data?.data ?? []).filter(
       (f) =>
-        !q ||
+        (!responsableFiltro || f.tarea.responsable === responsableFiltro) &&
+        (!q ||
         f.cliente.numeroDocumentoCliente.toLowerCase().includes(q) ||
-        f.cliente.nombreCliente.toLowerCase().includes(q)
+        f.cliente.nombreCliente.toLowerCase().includes(q))
     );
     const urgentes = base
       .filter((f) => esAbierta(f.tarea) && f.tarea.fechaVencimiento !== null && f.tarea.fechaVencimiento < hoy)
@@ -53,7 +59,12 @@ export function TareasPage() {
       .filter((f) => f.tarea.fechaVencimiento === hoy)
       .sort((a, b) => Number(!esAbierta(a.tarea)) - Number(!esAbierta(b.tarea)));
     return { urgentes, deHoy };
-  }, [data, busqueda, hoy]);
+  }, [data, busqueda, responsableFiltro, hoy]);
+
+  const responsables = useMemo(
+    () => [...new Set((data?.data ?? []).map((f) => f.tarea.responsable))].sort((a, b) => a.localeCompare(b)),
+    [data]
+  );
 
   const hechasHoy = deHoy.filter((f) => !esAbierta(f.tarea)).length;
 
@@ -64,6 +75,22 @@ export function TareasPage() {
       refetch();
     } finally {
       setMarcandoId(null);
+    }
+  }
+
+  async function handleReconstruir() {
+    setConfirmandoReconstruir(false);
+    setReconstruyendo(true);
+    try {
+      const r = await reconstruirCarteraMensual();
+      setResultadoReconstruir(
+        `Reparto reconstruido: ${r.nuevas} nueva(s), ${r.replanificadas} reubicada(s), ${r.canceladas} cancelada(s).`
+      );
+      refetch();
+    } catch {
+      setResultadoReconstruir("No se pudo reconstruir el reparto. Intenta de nuevo.");
+    } finally {
+      setReconstruyendo(false);
     }
   }
 
@@ -98,6 +125,13 @@ export function TareasPage() {
               });
             }
           }
+          items.push(
+            ...buildContactoMenuItems({
+              numeroDocumentoCliente: f.cliente.numeroDocumentoCliente,
+              idOrdenServicio: t.idOrdenServicio,
+              telefonoLimpio: f.cliente.telefonoEfectivo,
+            })
+          );
           items.push({ key: "ficha", label: "Abrir ficha", to: `/clientes/${f.cliente.numeroDocumentoCliente}` });
           return <ActionMenu label={`Acciones para ${f.cliente.nombreCliente}`} items={items} />;
         },
@@ -112,6 +146,14 @@ export function TareasPage() {
             sistemas={f.cliente.sistemas}
           />
         ),
+      },
+      {
+        // Igual que en Clientes: el numero es informacion visible; Llamar y
+        // WhatsApp estan en el menu de la fila.
+        key: "telefono",
+        label: "Teléfono",
+        render: (f) =>
+          f.cliente.telefonoEfectivo ? <span>{f.cliente.telefonoEfectivo}</span> : <span className="muted">—</span>,
       },
       { key: "plan", label: "Plan", render: (f) => f.cliente.periodicidad },
       {
@@ -172,8 +214,12 @@ export function TareasPage() {
           <button type="button" className={alcance === "todas" ? "btn btn-primary" : "btn btn-secondary"} onClick={() => setAlcance("todas")}>
             Ver todas
           </button>
+          <button type="button" className="btn btn-ghost" disabled={reconstruyendo} onClick={() => setConfirmandoReconstruir(true)}>
+            {reconstruyendo ? "Reconstruyendo..." : "Reconstruir reparto del mes"}
+          </button>
         </div>
       )}
+      {resultadoReconstruir && <p role="status">{resultadoReconstruir}</p>}
 
       {error && (
         <div className="error-banner" role="alert">
@@ -194,6 +240,19 @@ export function TareasPage() {
           <label htmlFor="tareas-busqueda">Cliente o RUC</label>
           <SearchInput id="tareas-busqueda" value={busqueda} onChange={setBusqueda} placeholder="Buscar..." />
         </div>
+        {esAdmin && alcance === "todas" && (
+          <div className="field">
+            <label htmlFor="tareas-responsable">Responsable</label>
+            <select id="tareas-responsable" value={responsableFiltro} onChange={(e) => setResponsableFiltro(e.target.value)}>
+              <option value="">Todos</option>
+              {responsables.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </FilterBar>
 
       {urgentes.length > 0 && (
@@ -221,7 +280,15 @@ export function TareasPage() {
         />
       </section>
 
-      {esAdmin && <CarteraMensualPanel />}
+      <ConfirmDialog
+        open={confirmandoReconstruir}
+        title="Reconstruir el reparto del mes"
+        message="Aplica las reglas actuales a los contactos del mes que siguen PENDIENTES: los reubica según el plan del cliente y la carga del equipo, y cancela los de clientes que ya no están en INICIAR COBRANZA o a quienes no les toca contacto este mes. No toca los ya contactados ni los en seguimiento, ni borra nada."
+        confirmLabel="Reconstruir"
+        danger
+        onConfirm={handleReconstruir}
+        onCancel={() => setConfirmandoReconstruir(false)}
+      />
 
       {clienteSeleccionado && (
         <AccionesClienteDrawer
