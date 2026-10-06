@@ -19,6 +19,14 @@ import "./Tareas.css";
 
 const MS_DIA = 86_400_000;
 
+type Vista = "pendientes" | "seguimiento" | "contactados";
+
+// Fecha LOCAL (YYYY-MM-DD) de un timestamp ISO — para saber si algo se hizo hoy.
+function fechaLocalDe(timestamp: string): string {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function diasDeAtraso(fecha: string, hoy: string): number {
   return Math.round((Date.parse(`${hoy}T00:00:00Z`) - Date.parse(`${fecha}T00:00:00Z`)) / MS_DIA);
 }
@@ -35,6 +43,7 @@ export function TareasPage() {
   const [busqueda, setBusqueda] = useState("");
   const [clienteSeleccionado, setClienteSeleccionado] = useState<string | null>(null);
   const [marcandoId, setMarcandoId] = useState<number | null>(null);
+  const [vista, setVista] = useState<Vista>("pendientes");
   const [responsableFiltro, setResponsableFiltro] = useState("");
   const [confirmandoReconstruir, setConfirmandoReconstruir] = useState(false);
   const [reconstruyendo, setReconstruyendo] = useState(false);
@@ -42,31 +51,37 @@ export function TareasPage() {
 
   const hoy = hoyIso();
 
-  const { urgentes, deHoy } = useMemo(() => {
+  // Tres vistas, como filtro: lo POR HACER (urgentes de dias anteriores en
+  // rojo + lo de hoy), lo que quedo EN SEGUIMIENTO (de cualquier fecha, para
+  // que no se pierda al marcarlo) y lo ya CONTACTADO hoy.
+  const { urgentes, deHoy, enSeguimiento, contactados } = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
     const base = (data?.data ?? []).filter(
       (f) =>
         (!responsableFiltro || f.tarea.responsable === responsableFiltro) &&
         (!q ||
-        f.cliente.numeroDocumentoCliente.toLowerCase().includes(q) ||
-        f.cliente.nombreCliente.toLowerCase().includes(q))
+          f.cliente.numeroDocumentoCliente.toLowerCase().includes(q) ||
+          f.cliente.nombreCliente.toLowerCase().includes(q))
     );
-    const urgentes = base
-      .filter((f) => esAbierta(f.tarea) && f.tarea.fechaVencimiento !== null && f.tarea.fechaVencimiento < hoy)
-      .sort((a, b) => (a.tarea.fechaVencimiento ?? "").localeCompare(b.tarea.fechaVencimiento ?? ""));
-    // Las hechas hoy quedan visibles, al final, para ver el avance del dia.
-    const deHoy = base
-      .filter((f) => f.tarea.fechaVencimiento === hoy)
-      .sort((a, b) => Number(!esAbierta(a.tarea)) - Number(!esAbierta(b.tarea)));
-    return { urgentes, deHoy };
+    const porFecha = (a: TareaCarteraMensual, b: TareaCarteraMensual) =>
+      (a.tarea.fechaVencimiento ?? "").localeCompare(b.tarea.fechaVencimiento ?? "");
+    const pendientes = base.filter((f) => f.tarea.estado === "PENDIENTE");
+    return {
+      urgentes: pendientes.filter((f) => f.tarea.fechaVencimiento !== null && f.tarea.fechaVencimiento < hoy).sort(porFecha),
+      deHoy: pendientes.filter((f) => f.tarea.fechaVencimiento === hoy),
+      enSeguimiento: base.filter((f) => f.tarea.estado === "EN_PROCESO").sort(porFecha),
+      contactados: base.filter(
+        (f) =>
+          f.tarea.estado === "COMPLETADA" &&
+          (f.tarea.fechaVencimiento === hoy || fechaLocalDe(f.tarea.updatedAt) === hoy)
+      ),
+    };
   }, [data, busqueda, responsableFiltro, hoy]);
 
   const responsables = useMemo(
     () => [...new Set((data?.data ?? []).map((f) => f.tarea.responsable))].sort((a, b) => a.localeCompare(b)),
     [data]
   );
-
-  const hechasHoy = deHoy.filter((f) => !esAbierta(f.tarea)).length;
 
   async function cambiarEstado(id: number, estado: "COMPLETADA" | "EN_PROCESO") {
     setMarcandoId(id);
@@ -232,7 +247,19 @@ export function TareasPage() {
 
       <div className="tareas-kpis">
         <KpiCard label="Urgentes (días anteriores)" value={urgentes.length} tone={urgentes.length > 0 ? "critical" : undefined} />
-        <KpiCard label="Para hoy" value={deHoy.length} hint={`${hechasHoy} contactado(s)`} />
+        <KpiCard label="Para hoy" value={deHoy.length} hint={`${contactados.length} contactado(s) hoy`} />
+      </div>
+
+      <div className="segmented-control tareas-vista-tabs" role="tablist" aria-label="Vista de las tareas">
+        <button type="button" role="tab" aria-selected={vista === "pendientes"} className={vista === "pendientes" ? "activo" : ""} onClick={() => setVista("pendientes")}>
+          Pendientes ({urgentes.length + deHoy.length})
+        </button>
+        <button type="button" role="tab" aria-selected={vista === "seguimiento"} className={vista === "seguimiento" ? "activo" : ""} onClick={() => setVista("seguimiento")}>
+          En seguimiento ({enSeguimiento.length})
+        </button>
+        <button type="button" role="tab" aria-selected={vista === "contactados"} className={vista === "contactados" ? "activo" : ""} onClick={() => setVista("contactados")}>
+          Contactados hoy ({contactados.length})
+        </button>
       </div>
 
       <FilterBar>
@@ -255,30 +282,55 @@ export function TareasPage() {
         )}
       </FilterBar>
 
-      {urgentes.length > 0 && (
-        <section className="card tareas-seccion tareas-seccion-urgente" aria-label="Tareas urgentes">
-          <h2 className="tareas-seccion-titulo">Urgentes — días anteriores sin hacer ({urgentes.length})</h2>
+      {vista === "pendientes" && (
+        <>
+          {urgentes.length > 0 && (
+            <section className="card tareas-seccion tareas-seccion-urgente" aria-label="Tareas urgentes">
+              <h2 className="tareas-seccion-titulo">Urgentes — días anteriores sin hacer ({urgentes.length})</h2>
+              <DataTable columns={columnas(true)} rows={urgentes} rowKey={(f) => f.tarea.id} loading={loading} stickyFirstColumn />
+            </section>
+          )}
+          <section className="card tareas-seccion" aria-label="Tareas de hoy">
+            <h2 className="tareas-seccion-titulo">Hoy — {formatFechaCorta(hoy)}</h2>
+            <DataTable
+              columns={columnas(false)}
+              rows={deHoy}
+              rowKey={(f) => f.tarea.id}
+              loading={loading}
+              emptyMessage={alcance === "mias" ? "No tienes contactos pendientes para hoy." : "No hay contactos pendientes para hoy."}
+              stickyFirstColumn
+            />
+          </section>
+        </>
+      )}
+
+      {vista === "seguimiento" && (
+        <section className="card tareas-seccion" aria-label="Tareas en seguimiento">
+          <h2 className="tareas-seccion-titulo">En seguimiento ({enSeguimiento.length})</h2>
           <DataTable
-            columns={columnas(true)}
-            rows={urgentes}
+            columns={columnas(false)}
+            rows={enSeguimiento}
             rowKey={(f) => f.tarea.id}
             loading={loading}
+            emptyMessage="No hay contactos en seguimiento."
             stickyFirstColumn
           />
         </section>
       )}
 
-      <section className="card tareas-seccion" aria-label="Tareas de hoy">
-        <h2 className="tareas-seccion-titulo">Hoy — {formatFechaCorta(hoy)}</h2>
-        <DataTable
-          columns={columnas(false)}
-          rows={deHoy}
-          rowKey={(f) => f.tarea.id}
-          loading={loading}
-          emptyMessage={alcance === "mias" ? "No tienes contactos asignados para hoy." : "No hay contactos asignados para hoy."}
-          stickyFirstColumn
-        />
-      </section>
+      {vista === "contactados" && (
+        <section className="card tareas-seccion" aria-label="Contactados hoy">
+          <h2 className="tareas-seccion-titulo">Contactados hoy ({contactados.length})</h2>
+          <DataTable
+            columns={columnas(false)}
+            rows={contactados}
+            rowKey={(f) => f.tarea.id}
+            loading={loading}
+            emptyMessage="Todavía no hay contactos marcados como contactados hoy."
+            stickyFirstColumn
+          />
+        </section>
+      )}
 
       <ConfirmDialog
         open={confirmandoReconstruir}
