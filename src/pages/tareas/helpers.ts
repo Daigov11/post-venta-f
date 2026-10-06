@@ -1,7 +1,12 @@
 import type { EstadoTarea, TareaListItem, TipoTarea } from "../../types/postventaCliente";
 
+// Fecha LOCAL (no UTC): toISOString() devolvia el dia siguiente despues de
+// las 19:00 en Lima.
 export function hoyIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const ahora = new Date();
+  const mes = String(ahora.getMonth() + 1).padStart(2, "0");
+  const dia = String(ahora.getDate()).padStart(2, "0");
+  return `${ahora.getFullYear()}-${mes}-${dia}`;
 }
 
 export function esAbierta(t: { estado: EstadoTarea }): boolean {

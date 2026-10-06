@@ -107,3 +107,30 @@
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-border);
 }
+
+.tareas-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.tareas-seccion {
+  margin-bottom: var(--space-4);
+}
+.tareas-seccion-titulo {
+  font-size: 1rem;
+  margin: 0 0 var(--space-3) 0;
+}
+
+/* Lo atrasado: borde y titulo rojos, sin depender solo del color (el titulo
+   y el badge dicen "Urgente"). */
+.tareas-seccion-urgente {
+  border: 2px solid var(--color-critical, #c62828);
+  background: rgba(198, 40, 40, 0.04);
+}
+.tareas-seccion-urgente .tareas-seccion-titulo,
+.tareas-atraso {
+  color: var(--color-critical, #c62828);
+  font-weight: 600;
+}
